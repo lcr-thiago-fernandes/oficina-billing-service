@@ -25,7 +25,7 @@ if [[ -z "$fila_url" ]]; then
 fi
 
 novo_guid() {
-  cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null     || powershell.exe -NoProfile -Command '[guid]::NewGuid().ToString()' | tr -d ''
+  cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null     || powershell.exe -NoProfile -Command '[guid]::NewGuid().ToString()' | tr -d '\r'
 }
 
 message_id=$(novo_guid)
