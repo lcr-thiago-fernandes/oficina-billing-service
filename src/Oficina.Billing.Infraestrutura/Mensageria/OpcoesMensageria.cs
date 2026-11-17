@@ -20,4 +20,10 @@ public class OpcoesMensageria
     /// (padrao 1 s / 30 s / 5 s). Reduzido apenas nos testes.
     /// </summary>
     public TimeSpan IntervaloMinimoRetry { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Base do redelivery atrasado (so SQS): intervalos de 1x, 5x e 15x este valor (padrao 1 / 5 / 15 min; o SQS
+    /// limita o atraso a 15 min). Reduzido apenas nos testes.
+    /// </summary>
+    public TimeSpan IntervaloBaseRedelivery { get; set; } = TimeSpan.FromMinutes(1);
 }

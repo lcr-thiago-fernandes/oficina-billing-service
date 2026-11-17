@@ -7,6 +7,7 @@ using Oficina.Billing.Infraestrutura.Mensageria;
 
 namespace Oficina.Billing.Infraestrutura.Testes.Mensageria;
 
+[Collection(ColecaoAmbiente.Nome)]
 public class TopologiaSagaTestes
 {
     private static readonly DateTime Agora = new(2026, 11, 16, 12, 0, 0, DateTimeKind.Utc);
@@ -109,6 +110,7 @@ public class TopologiaSagaTestes
         o.Regiao.Should().Be("us-east-1");
         o.ServiceUrl.Should().BeNull();
         o.IntervaloMinimoRetry.Should().Be(TimeSpan.FromSeconds(1));
+        o.IntervaloBaseRedelivery.Should().Be(TimeSpan.FromMinutes(1));
     }
 
     [Fact]

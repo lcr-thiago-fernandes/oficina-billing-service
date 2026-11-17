@@ -78,9 +78,9 @@ public static partial class ConfiguracaoMensageria
             // Fault<T> viraria topico nomeado pelo tipo .NET (fora do IAM *-oficina-*); falha definitiva vai para a _error.
             // No 8.5.12 PublishFaults so existe no receive endpoint (nao no configurador do bus).
             e.PublishFaults = false;
+            var baseRedelivery = opcoes.IntervaloBaseRedelivery;
             if (redeliveryAtrasado)
-                e.UseDelayedRedelivery(r => r.Intervals(TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5),
-                    TimeSpan.FromMinutes(15)));
+                e.UseDelayedRedelivery(r => r.Intervals(baseRedelivery, baseRedelivery * 5, baseRedelivery * 15));
             var minimo = opcoes.IntervaloMinimoRetry;
             e.UseMessageRetry(r => r.Exponential(EstornarPagamentoConsumidor.LimiteRetry, minimo, minimo * 30, minimo * 5));
             e.UseConsumeFilter(typeof(FiltroLogOrdemServico<>), ctx);

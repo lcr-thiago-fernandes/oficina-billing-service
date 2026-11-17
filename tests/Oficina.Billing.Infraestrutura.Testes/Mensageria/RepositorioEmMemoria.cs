@@ -52,6 +52,14 @@ internal class RepositorioEmMemoria : IRepositorioBilling
 /// <summary>Repositorio que sempre falha ao inserir: forca o consumidor de <c>GerarOrcamento</c> a lancar.</summary>
 internal sealed class RepositorioQueLanca : RepositorioEmMemoria
 {
-    public override Task<bool> InserirOrcamentoAsync(Orcamento orcamento, CancellationToken ct) =>
+    private int _tentativas;
+
+    /// <summary>Quantas vezes o consumidor tentou inserir (entregas, retries e redeliveries).</summary>
+    public int Tentativas => Volatile.Read(ref _tentativas);
+
+    public override Task<bool> InserirOrcamentoAsync(Orcamento orcamento, CancellationToken ct)
+    {
+        Interlocked.Increment(ref _tentativas);
         throw new InvalidOperationException("falha simulada do repositorio");
+    }
 }
