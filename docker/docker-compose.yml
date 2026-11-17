@@ -3,13 +3,13 @@ name: oficina-billing
 
 services:
   dynamodb:
-    image: amazon/dynamodb-local:2.5.4
+    image: amazon/dynamodb-local:2.5.2
     command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
     ports:
       - "8000:8000"
 
   localstack:
-    image: localstack/localstack:4.0
+    image: localstack/localstack:3.8.1
     environment:
       SERVICES: sqs,sns
     ports:

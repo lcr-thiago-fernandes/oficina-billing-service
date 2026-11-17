@@ -9,7 +9,7 @@ namespace Oficina.Billing.Infraestrutura.Testes.Persistencia;
 /// <summary>Um DynamoDB Local por classe de teste; cada teste cria a propria tabela.</summary>
 public sealed class DynamoFixture : IAsyncLifetime
 {
-    private readonly DynamoDbContainer _container = new DynamoDbBuilder("amazon/dynamodb-local:2.5.4")
+    private readonly DynamoDbContainer _container = new DynamoDbBuilder("amazon/dynamodb-local:2.5.2")
         .Build();
 
     public IAmazonDynamoDB Cliente { get; private set; } = null!;

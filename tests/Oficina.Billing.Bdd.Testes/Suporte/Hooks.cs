@@ -11,7 +11,7 @@ public sealed class Hooks(AmbienteBdd ambiente)
     [BeforeTestRun]
     public static async Task IniciarContainer()
     {
-        _container = new DynamoDbBuilder("amazon/dynamodb-local:2.5.4").Build();
+        _container = new DynamoDbBuilder("amazon/dynamodb-local:2.5.2").Build();
         await _container.StartAsync();
         AmbienteBdd.UrlDynamo = _container.GetConnectionString();
     }
