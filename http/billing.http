@@ -1,0 +1,57 @@
+# REST Client (VS Code). Compose local: cp .env.example .env && docker compose --env-file .env -f docker/docker-compose.yml up -d --build --wait
+#
+# Como obter um token:
+#  - Ambiente real: Lambda oficina-auth, POST /auth/cliente (perfil Cliente) ou o login de equipe (Atendente/Admin).
+#  - Local: JWT_SECRET=... ./scripts/gerar-token-dev.sh Atendente   (ou Admin; le .env se JWT_SECRET nao estiver definido)
+# Para criar um orcamento localmente: ./scripts/enviar-gerar-orcamento.sh <osId> (envia GerarOrcamento para a fila de comandos).
+@baseUrl = http://localhost:8082/billing
+@token = 
+@tokenAdmin = 
+@osId = 3f2b8c1e-6a4d-4e7b-9c3a-1d2e3f4a5b6c
+
+### Health (anonimo)
+GET {{baseUrl}}/health
+
+### Swagger
+GET {{baseUrl}}/swagger/v1/swagger.json
+
+### Obter orcamento
+GET {{baseUrl}}/api/v1/orcamentos/{{osId}}
+Authorization: Bearer {{token}}
+
+### Aprovar orcamento (devolve o link de pagamento; idempotente)
+POST {{baseUrl}}/api/v1/orcamentos/{{osId}}/aprovacao
+Authorization: Bearer {{token}}
+
+### Rejeitar orcamento
+POST {{baseUrl}}/api/v1/orcamentos/{{osId}}/rejeicao
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "motivo": "Valor acima do esperado" }
+
+### Listar pagamentos da OS
+GET {{baseUrl}}/api/v1/pagamentos/{{osId}}
+Authorization: Bearer {{token}}
+
+### Simulador: pagamento aprovado (so com Pagamento__Modo=Simulado; exige Admin)
+POST {{baseUrl}}/api/v1/simulador/pagamentos/{{osId}}
+Authorization: Bearer {{tokenAdmin}}
+Content-Type: application/json
+
+{ "resultado": "aprovado" }
+
+### Simulador: pagamento recusado
+POST {{baseUrl}}/api/v1/simulador/pagamentos/{{osId}}
+Authorization: Bearer {{tokenAdmin}}
+Content-Type: application/json
+
+{ "resultado": "recusado" }
+
+### Webhook do Mercado Pago (publico; x-signature = ts=<epoch>,v1=<HMAC-SHA256 do manifesto com MP_WEBHOOK_SECRET>)
+POST {{baseUrl}}/webhooks/mercadopago?type=payment&data.id=123456789
+x-signature: ts=1731700000,v1=0000000000000000000000000000000000000000000000000000000000000000
+x-request-id: 5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a
+Content-Type: application/json
+
+{ "action": "payment.updated", "type": "payment", "data": { "id": "123456789" } }
