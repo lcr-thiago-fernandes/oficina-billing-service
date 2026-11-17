@@ -45,8 +45,10 @@ public class ProcessarNotificacaoPagamentoTestes
     }
 
     private void ComPagamentoSalvo(StatusPagamento status) =>
-        _repo.Setup(r => r.ListarPagamentosAsync(Cenario.OsId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Pagamento.Registrar(Id, Cenario.OsId, 191.00m, "pix", status, null, RelogioFixo.Agora) });
+        ComPagamentos(Pagamento.Registrar(Id, Cenario.OsId, 191.00m, "pix", status, null, RelogioFixo.Agora));
+
+    private void ComPagamentos(params Pagamento[] pagamentos) =>
+        _repo.Setup(r => r.ListarPagamentosAsync(Cenario.OsId, It.IsAny<CancellationToken>())).ReturnsAsync(pagamentos);
 
     private void EstornoNoGateway() =>
         _gw.Setup(g => g.EstornarAsync(It.IsAny<string>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -333,16 +335,161 @@ public class ProcessarNotificacaoPagamentoTestes
     }
 
     [Fact]
-    public async Task StatusEstornado_Ignora()
+    public async Task StatusEstornado_JaEstornadoLocalmente_Ignora()
     {
+        // Estorno feito pelo fluxo de compensacao (EstornarPagamento), que publica o PagamentoEstornado.
         NoGateway(StatusPagamentoGateway.Estornado);
-        ComOrcamento(StatusOrcamento.Aprovado);
+        ComOrcamento(StatusOrcamento.Cancelado);
+        var p = Pagamento.Registrar(Id, Cenario.OsId, 191.00m, "pix", StatusPagamento.Aprovado, null, RelogioFixo.Agora);
+        p.Estornar("est-0", RelogioFixo.Agora);
+        ComPagamentos(p);
 
         var r = await Criar().ExecutarAsync(Id, default);
 
         r.Should().Be(ResultadoNotificacao.Ignorado);
         NuncaRegistrou();
+        NuncaEstornou();
         _repo.Verify(x => x.SalvarPagamentoAsync(It.IsAny<Pagamento>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        _pub.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task StatusEstornado_RegistroJaPublicado_Duplicado()
+    {
+        NoGateway(StatusPagamentoGateway.Estornado);
+        ComOrcamento(StatusOrcamento.Cancelado);
+        _repo.Setup(r => r.ObterRegistroWebhookAsync(Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RegistroWebhook(Id, Cenario.OsId, "PagamentoConfirmado", null, true, RelogioFixo.Agora));
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Duplicado);
+        NuncaEstornou();
+        _pub.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task StatusEstornado_EstornoAutomaticoComPublicacaoInterrompida_RepublicaRecusado()
+    {
+        // Estorno automatico gravado, publicacao falhou; o MP reentrega com o pagamento ja "refunded".
+        NoGateway(StatusPagamentoGateway.Estornado, valor: 100.00m);
+        ComOrcamento(StatusOrcamento.Cancelado);
+        _repo.Setup(r => r.ObterRegistroWebhookAsync(Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RegistroWebhook(Id, Cenario.OsId, "PagamentoRecusado", "valor_divergente", false, RelogioFixo.Agora));
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Duplicado);
+        _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoRecusado>(m => m.PagamentoId == Id && m.Motivo == "valor_divergente"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _repo.Verify(x => x.MarcarEventoPublicadoAsync(Id, It.IsAny<CancellationToken>()), Times.Once);
+        NuncaEstornou();
+        NuncaRegistrou();
+    }
+
+    [Fact]
+    public async Task StatusEstornado_EstornoAutomaticoSemDesfechoGravado_RefazDecisaoEPublicaRecusado()
+    {
+        // Queda entre EstornarAsync e RegistrarDesfecho: nada gravado, dinheiro ja devolvido.
+        NoGateway(StatusPagamentoGateway.Estornado, valor: 100.00m);
+        ComOrcamento(StatusOrcamento.Aprovado);
+        EstornoNoGateway();
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Processado);
+        _gw.Verify(g => g.EstornarAsync(Id, 100.00m, "estorno-1325123456", It.IsAny<CancellationToken>()), Times.Once);
+        _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Estornado);
+        _desfecho.OrcamentoAlterado!.Status.Should().Be(StatusOrcamento.Cancelado);
+        _desfecho.OrcamentoAlterado.Motivo.Should().Be("valor_divergente");
+        _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoRecusado>(m => m.PagamentoId == Id && m.Motivo == "valor_divergente"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _pub.Verify(p => p.PublicarAsync(It.IsAny<PagamentoConfirmado>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task StatusEstornado_ValorIgualSemDesfechoGravado_NuncaConfirma()
+    {
+        // Pagamento devolvido no gateway antes de ser processado: nunca vira PagamentoConfirmado.
+        NoGateway(StatusPagamentoGateway.Estornado);
+        ComOrcamento(StatusOrcamento.Aprovado);
+        EstornoNoGateway();
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Processado);
+        _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Estornado);
+        _desfecho.OrcamentoAlterado!.Status.Should().Be(StatusOrcamento.Cancelado);
+        _pub.Verify(p => p.PublicarAsync(It.IsAny<PagamentoConfirmado>(), It.IsAny<CancellationToken>()), Times.Never);
+        _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoRecusado>(m => m.PagamentoId == Id && m.Motivo == "pagamento_estornado"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task OutroPagamentoAprovado_Recusado_NaoCancelaNemPublica()
+    {
+        // Webhooks fora de ordem: B aprovado ja confirmado, chega A recusado.
+        NoGateway(StatusPagamentoGateway.Recusado, detalhe: "cc_rejected_other_reason");
+        ComOrcamento(StatusOrcamento.Aprovado);
+        ComPagamentos(Pagamento.Registrar("999", Cenario.OsId, 191.00m, "pix", StatusPagamento.Aprovado, null, RelogioFixo.Agora));
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Processado);
+        _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Recusado);
+        _desfecho.OrcamentoAlterado.Should().BeNull();
+        _desfecho.Webhook.EventoTipo.Should().Be("Nenhum");
+        _pub.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task OutroPagamentoAprovado_SegundoAprovado_EstornaSemPublicar()
+    {
+        NoGateway(StatusPagamentoGateway.Aprovado);
+        ComOrcamento(StatusOrcamento.Aprovado);
+        ComPagamentos(Pagamento.Registrar("999", Cenario.OsId, 191.00m, "pix", StatusPagamento.Aprovado, null, RelogioFixo.Agora));
+        EstornoNoGateway();
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Processado);
+        _gw.Verify(g => g.EstornarAsync(Id, 191.00m, "estorno-1325123456", It.IsAny<CancellationToken>()), Times.Once);
+        _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Estornado);
+        _desfecho.OrcamentoAlterado.Should().BeNull();
+        _desfecho.Webhook.EventoTipo.Should().Be("Nenhum");
+        _pub.VerifyNoOtherCalls();
+        _tel.Verify(t => t.Registrar(It.Is<EventoPagamento>(e => e.Etapa == "EstornoAutomatico")), Times.Once);
+    }
+
+    [Fact]
+    public async Task CorridaEntreReplicas_VencedorAindaNaoPublicou_Republica()
+    {
+        NoGateway(StatusPagamentoGateway.Aprovado);
+        ComOrcamento(StatusOrcamento.Aprovado);
+        _repo.SetupSequence(r => r.ObterRegistroWebhookAsync(Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RegistroWebhook?)null)
+            .ReturnsAsync(new RegistroWebhook(Id, Cenario.OsId, "PagamentoConfirmado", null, false, RelogioFixo.Agora));
+        _repo.Setup(r => r.RegistrarDesfechoAsync(It.IsAny<DesfechoPagamento>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Duplicado);
+        _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoConfirmado>(m => m.PagamentoId == Id), It.IsAny<CancellationToken>()), Times.Once);
+        _repo.Verify(x => x.MarcarEventoPublicadoAsync(Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CorridaEntreReplicas_RegistroDoVencedorIlegivel_Lanca()
+    {
+        NoGateway(StatusPagamentoGateway.Aprovado);
+        ComOrcamento(StatusOrcamento.Aprovado);
+        _repo.Setup(r => r.RegistrarDesfechoAsync(It.IsAny<DesfechoPagamento>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var act = () => Criar().ExecutarAsync(Id, default);
+
+        await act.Should().ThrowAsync<ConcorrenciaException>();
         _pub.VerifyNoOtherCalls();
     }
 }

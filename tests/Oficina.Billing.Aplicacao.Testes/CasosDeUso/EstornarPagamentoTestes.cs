@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Oficina.Billing.Aplicacao.CasosDeUso;
 using Oficina.Billing.Aplicacao.Mensagens;
@@ -32,7 +33,76 @@ public class EstornarPagamentoTestes
     }
 
     private EstornarPagamentoCasoDeUso Criar() =>
-        new(_repo.Object, _gw.Object, _pub.Object, _tel.Object, new RelogioFixo());
+        new(_repo.Object, _gw.Object, _pub.Object, _tel.Object, new RelogioFixo(),
+            NullLogger<EstornarPagamentoCasoDeUso>.Instance);
+
+    private void EstornoNoGateway() =>
+        _gw.Setup(g => g.EstornarAsync(Id, 191.00m, "estorno-1325123456", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EstornoGateway("est-9", 191.00m));
+
+    private void ConflitoAoSalvar() =>
+        _repo.Setup(x => x.SalvarPagamentoAsync(It.IsAny<Pagamento>(), false, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ConcorrenciaException("conflito"));
+
+    [Fact]
+    public async Task GatewayRecusaEstorno4xx_PublicaEstornoFalhouSemEsperarRetry()
+    {
+        ComOrcamento(StatusOrcamento.Aprovado);
+        ComPagamento(StatusPagamento.Aprovado);
+        _gw.Setup(g => g.EstornarAsync(It.IsAny<string>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("MP 400"));
+
+        await Criar().ExecutarAsync(Comando, ultimaTentativa: false, default);
+
+        _pub.Verify(p => p.PublicarAsync(It.Is<EstornoFalhou>(m => m.Motivo == "Mercado Pago recusou o estorno"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _pub.Verify(p => p.PublicarAsync(It.IsAny<PagamentoEstornado>(), It.IsAny<CancellationToken>()), Times.Never);
+        _repo.Verify(x => x.SalvarPagamentoAsync(It.IsAny<Pagamento>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        _tel.Verify(t => t.Registrar(It.Is<EventoPagamento>(e => e.Etapa == "EstornoFalhou" && e.Resultado == "Falha")), Times.Once);
+    }
+
+    [Fact]
+    public async Task ConflitoAoGravar_UltimaTentativa_PublicaEstornoFalhou()
+    {
+        ComOrcamento(StatusOrcamento.Aprovado);
+        ComPagamento(StatusPagamento.Aprovado);
+        EstornoNoGateway();
+        ConflitoAoSalvar();
+
+        await Criar().ExecutarAsync(Comando, ultimaTentativa: true, default);
+
+        _pub.Verify(p => p.PublicarAsync(It.Is<EstornoFalhou>(m => m.Motivo == "Falha ao processar o estorno apos 3 tentativas"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _pub.Verify(p => p.PublicarAsync(It.IsAny<PagamentoEstornado>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ConflitoAoGravar_NaoUltima_Relanca()
+    {
+        ComOrcamento(StatusOrcamento.Aprovado);
+        ComPagamento(StatusPagamento.Aprovado);
+        EstornoNoGateway();
+        ConflitoAoSalvar();
+
+        var act = () => Criar().ExecutarAsync(Comando, ultimaTentativa: false, default);
+
+        await act.Should().ThrowAsync<ConcorrenciaException>();
+        _pub.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Cancelamento_UltimaTentativa_Relanca()
+    {
+        ComOrcamento(StatusOrcamento.Aprovado);
+        ComPagamento(StatusPagamento.Aprovado);
+        _gw.Setup(g => g.EstornarAsync(It.IsAny<string>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+
+        var act = () => Criar().ExecutarAsync(Comando, ultimaTentativa: true, default);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        _pub.VerifyNoOtherCalls();
+    }
 
     private Orcamento ComOrcamento(StatusOrcamento status)
     {

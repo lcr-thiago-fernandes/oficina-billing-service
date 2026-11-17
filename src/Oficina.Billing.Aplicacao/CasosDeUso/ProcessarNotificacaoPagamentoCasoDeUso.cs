@@ -21,6 +21,7 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
     private const string EventoNenhum = "Nenhum";
     private const string MotivoValorDivergente = "valor_divergente";
     private const string MotivoRecusaPadrao = "rejected";
+    private const string MotivoPagamentoEstornado = "pagamento_estornado";
 
     public async Task<ResultadoNotificacao> ExecutarAsync(string pagamentoId, CancellationToken ct)
     {
@@ -41,13 +42,18 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
             return ResultadoNotificacao.Ignorado;
         }
 
+        // 2. Desfecho ja gravado: republica se a publicacao anterior nao foi concluida. Vem antes de qualquer regra
+        //    sobre o status do gateway: apos um estorno automatico o MP reentrega o pagamento ja "refunded", e o
+        //    evento gravado (ex.: PagamentoRecusado "valor_divergente") ainda precisa chegar a saga.
+        var registro = await repositorio.ObterRegistroWebhookAsync(pagamentoId, ct);
+        var pagamentos = await repositorio.ListarPagamentosAsync(ordemServicoId, ct);
+        var existente = pagamentos.FirstOrDefault(p => p.Id == pagamentoId);
+        if (registro is not null)
+            return await TratarDuplicadoAsync(registro, pg, existente, ct);
+
         var agora = relogio.GetUtcNow().UtcDateTime;
 
-        // 2. Pendente / Estornado.
-        if (pg.Status == StatusPagamentoGateway.Estornado)
-            return ResultadoNotificacao.Ignorado; // o PagamentoEstornado e publicado pelo fluxo de estorno
-
-        var existente = await ObterPagamentoSalvoAsync(ordemServicoId, pagamentoId, ct);
+        // 3. Pendente: so registra (N3).
         if (pg.Status == StatusPagamentoGateway.Pendente)
         {
             if (existente is null)
@@ -58,30 +64,34 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
             return ResultadoNotificacao.Pendente;
         }
 
-        // 3. Ja processado: republica se a publicacao anterior nao foi concluida.
-        var registro = await repositorio.ObterRegistroWebhookAsync(pagamentoId, ct);
-        if (registro is not null)
-            return await TratarDuplicadoAsync(registro, pg, existente, ct);
         if (existente is not null && existente.Status != StatusPagamento.Pendente)
         {
-            // Desfecho ja gravado sem registro de webhook (ex.: registro expirado pelo TTL): nada a decidir de novo.
+            // Ja decidido sem registro de webhook: estorno pela compensacao (que publica o PagamentoEstornado) ou
+            // registro expirado pelo TTL. Nada a decidir de novo.
             logger.LogWarning("Notificacao ignorada: pagamento {PagamentoId} ja esta {Status} sem registro de webhook",
                 pagamentoId, existente.Status);
             return ResultadoNotificacao.Ignorado;
         }
 
-        // 4. Desfecho.
+        // 4. Desfecho. Um pagamento ja aprovado da OS tem precedencia: outro aprovado e estornado, um recusado
+        //    nao mexe no orcamento, e nenhum dos dois gera evento para a saga (que ja recebeu o PagamentoConfirmado).
+        var outroAprovado = pagamentos.Any(p => p.Id != pagamentoId && p.Status == StatusPagamento.Aprovado);
+        var orcamentoAguardaPagamento = orcamento.Status == StatusOrcamento.Aprovado && !outroAprovado;
+
         Pagamento pagamento;
         var pagamentoNovo = existente is null;
         Orcamento? orcamentoAlterado = null;
-        string eventoTipo;
+        var eventoTipo = EventoNenhum;
         string? motivo = null;
         var estornoAutomatico = false;
 
-        if (pg.Status == StatusPagamentoGateway.Aprovado)
+        if (pg.Status is StatusPagamentoGateway.Aprovado or StatusPagamentoGateway.Estornado)
         {
+            // Estornado sem desfecho gravado = queda entre o estorno automatico e a gravacao (ou devolucao feita
+            // direto no gateway): refaz a decisao como aprovado, mas nunca confirma.
             pagamento = AprovarOuRegistrar(existente, pg, ordemServicoId, agora);
-            if (orcamento.Status == StatusOrcamento.Aprovado && pg.Valor == orcamento.ValorTotal)
+            if (pg.Status == StatusPagamentoGateway.Aprovado && orcamentoAguardaPagamento &&
+                pg.Valor == orcamento.ValorTotal)
             {
                 eventoTipo = EventoConfirmado;
             }
@@ -91,32 +101,24 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
                 var estorno = await gateway.EstornarAsync(pagamentoId, pg.Valor, $"estorno-{pagamentoId}", ct);
                 pagamento.Estornar(estorno.EstornoId, agora);
                 estornoAutomatico = true;
-                if (orcamento.Status == StatusOrcamento.Aprovado)
+                if (orcamentoAguardaPagamento)
                 {
-                    orcamento.Cancelar(MotivoValorDivergente, agora);
+                    motivo = pg.Valor != orcamento.ValorTotal ? MotivoValorDivergente : MotivoPagamentoEstornado;
+                    orcamento.Cancelar(motivo, agora);
                     orcamentoAlterado = orcamento;
                     eventoTipo = EventoRecusado;
-                    motivo = MotivoValorDivergente;
-                }
-                else
-                {
-                    eventoTipo = EventoNenhum;
                 }
             }
         }
         else // Recusado
         {
             pagamento = RecusarOuRegistrar(existente, pg, ordemServicoId, agora);
-            if (orcamento.Status == StatusOrcamento.Aprovado)
+            if (orcamentoAguardaPagamento)
             {
                 motivo = pg.DetalheStatus ?? MotivoRecusaPadrao;
                 orcamento.Cancelar(motivo, agora);
                 orcamentoAlterado = orcamento;
                 eventoTipo = EventoRecusado;
-            }
-            else
-            {
-                eventoTipo = EventoNenhum;
             }
         }
 
@@ -125,11 +127,12 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
         if (!await repositorio.RegistrarDesfechoAsync(
                 new DesfechoPagamento(webhook, pagamento, pagamentoNovo, orcamentoAlterado), ct))
         {
-            // Outra replica registrou primeiro.
-            var vencedor = await repositorio.ObterRegistroWebhookAsync(pagamentoId, ct);
-            return vencedor is null
-                ? ResultadoNotificacao.Duplicado
-                : await TratarDuplicadoAsync(vencedor, pg, await ObterPagamentoSalvoAsync(ordemServicoId, pagamentoId, ct), ct);
+            // Outra replica registrou primeiro. Se ela ainda nao publicou, esta tambem publica: o evento e identico
+            // (mesmo registro), o que e aceitavel com entrega at-least-once.
+            var vencedor = await repositorio.ObterRegistroWebhookAsync(pagamentoId, ct)
+                ?? throw new ConcorrenciaException(
+                    $"Registro de webhook do pagamento {pagamentoId} ja existe mas nao pode ser lido");
+            return await TratarDuplicadoAsync(vencedor, pg, null, ct);
         }
 
         // 6. Publica e marca.
@@ -144,10 +147,6 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
 
         return ResultadoNotificacao.Processado;
     }
-
-    private async Task<Pagamento?> ObterPagamentoSalvoAsync(Guid ordemServicoId, string pagamentoId,
-        CancellationToken ct) =>
-        (await repositorio.ListarPagamentosAsync(ordemServicoId, ct)).FirstOrDefault(p => p.Id == pagamentoId);
 
     private static Pagamento AprovarOuRegistrar(Pagamento? existente, PagamentoGateway pg, Guid ordemServicoId,
         DateTime agora)
