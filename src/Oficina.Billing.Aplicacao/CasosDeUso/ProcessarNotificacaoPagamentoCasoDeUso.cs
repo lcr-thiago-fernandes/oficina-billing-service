@@ -87,8 +87,8 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
 
         if (pg.Status is StatusPagamentoGateway.Aprovado or StatusPagamentoGateway.Estornado)
         {
-            // Estornado sem desfecho gravado = queda entre o estorno automatico e a gravacao (ou devolucao feita
-            // direto no gateway): refaz a decisao como aprovado, mas nunca confirma.
+            // Estornado sem desfecho gravado = queda entre o estorno automatico e a gravacao, ou devolucao/chargeback
+            // feito direto no gateway: refaz a decisao como aprovado, mas nunca confirma.
             pagamento = AprovarOuRegistrar(existente, pg, ordemServicoId, agora);
             if (pg.Status == StatusPagamentoGateway.Aprovado && orcamentoAguardaPagamento &&
                 pg.Valor == orcamento.ValorTotal)
@@ -97,10 +97,19 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
             }
             else
             {
-                // Pagamento que nao pode ser aceito: estorna (chave idempotente) e nunca confirma.
-                var estorno = await gateway.EstornarAsync(pagamentoId, pg.Valor, $"estorno-{pagamentoId}", ct);
-                pagamento.Estornar(estorno.EstornoId, agora);
-                estornoAutomatico = true;
+                if (pg.Status == StatusPagamentoGateway.Estornado)
+                {
+                    // O dinheiro ja voltou: um novo POST de estorno (fora da nossa chave) responderia 4xx e
+                    // prenderia a notificacao em loop de reentrega.
+                    pagamento.Estornar(EstornarPagamentoCasoDeUso.EstornoExterno, agora);
+                }
+                else
+                {
+                    // Pagamento que nao pode ser aceito: estorna (chave idempotente) e nunca confirma.
+                    var estorno = await gateway.EstornarAsync(pagamentoId, pg.Valor, $"estorno-{pagamentoId}", ct);
+                    pagamento.Estornar(estorno.EstornoId, agora);
+                    estornoAutomatico = true;
+                }
                 if (orcamentoAguardaPagamento)
                 {
                     motivo = pg.Valor != orcamento.ValorTotal ? MotivoValorDivergente : MotivoPagamentoEstornado;

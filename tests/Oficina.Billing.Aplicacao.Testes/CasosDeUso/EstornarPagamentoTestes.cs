@@ -62,6 +62,42 @@ public class EstornarPagamentoTestes
     }
 
     [Fact]
+    public async Task GatewayRecusaEstorno4xx_PagamentoJaEstornadoNoGateway_ConcluiComoSucesso()
+    {
+        // Queda entre EstornarAsync e SalvarPagamento: a reentrega encontra o pagamento ja devolvido no MP.
+        ComOrcamento(StatusOrcamento.Aprovado);
+        ComPagamento(StatusPagamento.Aprovado);
+        _gw.Setup(g => g.EstornarAsync(It.IsAny<string>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("MP 400"));
+        _gw.Setup(g => g.ObterPagamentoAsync(Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PagamentoGateway(Id, Cenario.OsId, StatusPagamentoGateway.Estornado, null, 191.00m, "pix"));
+
+        await Criar().ExecutarAsync(Comando, ultimaTentativa: false, default);
+
+        _repo.Verify(x => x.SalvarPagamentoAsync(It.Is<Pagamento>(p => p.Status == StatusPagamento.Estornado &&
+            p.EstornoId == "externo"), false, It.IsAny<CancellationToken>()), Times.Once);
+        _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoEstornado>(m => m.PagamentoId == Id && m.Valor == 191.00m),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _pub.Verify(p => p.PublicarAsync(It.IsAny<EstornoFalhou>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task FalhaAposPublicarEstornado_UltimaTentativa_NaoPublicaEstornoFalhou()
+    {
+        ComOrcamento(StatusOrcamento.Aprovado);
+        ComPagamento(StatusPagamento.Aprovado);
+        EstornoNoGateway();
+        _tel.Setup(t => t.Registrar(It.Is<EventoPagamento>(e => e.Etapa == "PagamentoEstornado")))
+            .Throws(new InvalidOperationException("telemetria fora"));
+
+        try { await Criar().ExecutarAsync(Comando, ultimaTentativa: true, default); }
+        catch (InvalidOperationException) { /* a falha da telemetria pode propagar; so nao pode virar EstornoFalhou */ }
+
+        _pub.Verify(p => p.PublicarAsync(It.IsAny<PagamentoEstornado>(), It.IsAny<CancellationToken>()), Times.Once);
+        _pub.Verify(p => p.PublicarAsync(It.IsAny<EstornoFalhou>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ConflitoAoGravar_UltimaTentativa_PublicaEstornoFalhou()
     {
         ComOrcamento(StatusOrcamento.Aprovado);

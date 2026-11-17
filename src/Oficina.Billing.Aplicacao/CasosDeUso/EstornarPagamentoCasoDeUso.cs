@@ -19,6 +19,9 @@ public class EstornarPagamentoCasoDeUso(IRepositorioBilling repositorio, IGatewa
     public const string MotivoGatewayRecusou = "Mercado Pago recusou o estorno";
     public const string MotivoFalhaGenerica = "Falha ao processar o estorno apos 3 tentativas";
 
+    /// <summary>Id de estorno gravado quando a devolucao ja consta no gateway sem um estorno nosso identificavel.</summary>
+    public const string EstornoExterno = "externo";
+
     /// <param name="ultimaTentativa">
     /// true na ultima entrega do retry: qualquer falha (exceto cancelamento) vira <c>EstornoFalhou</c> em vez de excecao.
     /// </param>
@@ -26,6 +29,7 @@ public class EstornarPagamentoCasoDeUso(IRepositorioBilling repositorio, IGatewa
     {
         var osId = comando.OrdemServicoId;
         var numeroOs = 0;
+        Pagamento? estornado = null;
         try
         {
             var pagamentos = await repositorio.ListarPagamentosAsync(osId, ct);
@@ -35,21 +39,28 @@ public class EstornarPagamentoCasoDeUso(IRepositorioBilling repositorio, IGatewa
             var pagamento = pagamentos.FirstOrDefault(p => p.Status == StatusPagamento.Aprovado);
             if (pagamento is not null)
             {
-                EstornoGateway estorno;
+                string estornoId;
                 try
                 {
-                    estorno = await gateway.EstornarAsync(pagamento.Id, pagamento.Valor, $"estorno-{pagamento.Id}", ct);
+                    estornoId = (await gateway.EstornarAsync(pagamento.Id, pagamento.Valor, $"estorno-{pagamento.Id}",
+                        ct)).EstornoId;
                 }
                 catch (InvalidOperationException ex)
                 {
-                    // 4xx do gateway: nao adianta repetir.
-                    logger.LogError(ex, "Gateway recusou o estorno do pagamento {PagamentoId} da OS {OrdemServicoId}",
-                        pagamento.Id, osId);
-                    await PublicarFalhaAsync(osId, numeroOs, MotivoGatewayRecusou, pagamento.Valor, ct);
-                    return;
+                    // 4xx do gateway: nao adianta repetir. Se o pagamento ja consta devolvido no gateway (queda entre
+                    // o estorno e a gravacao, ou devolucao externa), o estorno esta feito: segue como sucesso.
+                    var noGateway = await gateway.ObterPagamentoAsync(pagamento.Id, ct);
+                    if (noGateway?.Status != StatusPagamentoGateway.Estornado)
+                    {
+                        logger.LogError(ex, "Gateway recusou o estorno do pagamento {PagamentoId} da OS {OrdemServicoId}",
+                            pagamento.Id, osId);
+                        await PublicarFalhaAsync(osId, numeroOs, MotivoGatewayRecusou, pagamento.Valor, ct);
+                        return;
+                    }
+                    estornoId = EstornoExterno;
                 }
 
-                pagamento.Estornar(estorno.EstornoId, relogio.GetUtcNow().UtcDateTime);
+                pagamento.Estornar(estornoId, relogio.GetUtcNow().UtcDateTime);
                 await repositorio.SalvarPagamentoAsync(pagamento, novo: false, ct);
             }
             else
@@ -74,15 +85,19 @@ public class EstornarPagamentoCasoDeUso(IRepositorioBilling repositorio, IGatewa
                 PagamentoId = pagamento.Id,
                 Valor = pagamento.Valor,
             }, ct);
-            telemetria.Registrar(new EventoPagamento(osId, numeroOs, "PagamentoEstornado", "Sucesso", pagamento.Valor,
-                pagamento.Meio, gateway.Nome));
+            estornado = pagamento; // ultima instrucao do try: nada apos a publicacao pode virar EstornoFalhou
         }
         catch (Exception ex) when (ultimaTentativa && ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Estorno da OS {OrdemServicoId} falhou na ultima tentativa", osId);
             var motivo = ex is GatewayPagamentoIndisponivelException ? MotivoGatewayIndisponivel : MotivoFalhaGenerica;
             await PublicarFalhaAsync(osId, numeroOs, motivo, null, ct);
+            return;
         }
+
+        if (estornado is not null)
+            telemetria.Registrar(new EventoPagamento(osId, numeroOs, "PagamentoEstornado", "Sucesso", estornado.Valor,
+                estornado.Meio, gateway.Nome));
     }
 
     private async Task PublicarFalhaAsync(Guid osId, int numeroOs, string motivo, decimal? valor, CancellationToken ct)

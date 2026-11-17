@@ -54,6 +54,10 @@ public class ProcessarNotificacaoPagamentoTestes
         _gw.Setup(g => g.EstornarAsync(It.IsAny<string>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EstornoGateway("est-1", 191.00m));
 
+    private void EstornoRecusadoPeloGateway() =>
+        _gw.Setup(g => g.EstornarAsync(It.IsAny<string>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("MP 400: payment already refunded"));
+
     private void NuncaEstornou() =>
         _gw.Verify(g => g.EstornarAsync(It.IsAny<string>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
 
@@ -393,13 +397,14 @@ public class ProcessarNotificacaoPagamentoTestes
         // Queda entre EstornarAsync e RegistrarDesfecho: nada gravado, dinheiro ja devolvido.
         NoGateway(StatusPagamentoGateway.Estornado, valor: 100.00m);
         ComOrcamento(StatusOrcamento.Aprovado);
-        EstornoNoGateway();
+        EstornoRecusadoPeloGateway(); // refund POST num pagamento ja devolvido -> 4xx
 
         var r = await Criar().ExecutarAsync(Id, default);
 
         r.Should().Be(ResultadoNotificacao.Processado);
-        _gw.Verify(g => g.EstornarAsync(Id, 100.00m, "estorno-1325123456", It.IsAny<CancellationToken>()), Times.Once);
-        _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Estornado);
+        NuncaEstornou();
+        _desfecho!.Pagamento.EstornoId.Should().Be("externo");
+        _desfecho.Pagamento.Status.Should().Be(StatusPagamento.Estornado);
         _desfecho.OrcamentoAlterado!.Status.Should().Be(StatusOrcamento.Cancelado);
         _desfecho.OrcamentoAlterado.Motivo.Should().Be("valor_divergente");
         _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoRecusado>(m => m.PagamentoId == Id && m.Motivo == "valor_divergente"),
@@ -413,11 +418,12 @@ public class ProcessarNotificacaoPagamentoTestes
         // Pagamento devolvido no gateway antes de ser processado: nunca vira PagamentoConfirmado.
         NoGateway(StatusPagamentoGateway.Estornado);
         ComOrcamento(StatusOrcamento.Aprovado);
-        EstornoNoGateway();
+        EstornoRecusadoPeloGateway();
 
         var r = await Criar().ExecutarAsync(Id, default);
 
         r.Should().Be(ResultadoNotificacao.Processado);
+        NuncaEstornou();
         _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Estornado);
         _desfecho.OrcamentoAlterado!.Status.Should().Be(StatusOrcamento.Cancelado);
         _pub.Verify(p => p.PublicarAsync(It.IsAny<PagamentoConfirmado>(), It.IsAny<CancellationToken>()), Times.Never);
