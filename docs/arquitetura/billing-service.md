@@ -99,7 +99,7 @@ do próprio Billing.
 | Pagamento recusado pelo gateway | Orçamento `Cancelado` e `PagamentoRecusado` (motivo = detalhe do gateway) | Orquestrador cancela a OS e restaura o estoque |
 | Pagamento aprovado inaceitável (valor divergente, orçamento cancelado, duplicado) | Estorno automático e, se a OS aguardava, `PagamentoRecusado` | Igual à linha anterior; nunca confirma |
 | Execução recusada depois do pagamento (sem capacidade) | Recebe `EstornarPagamento`: estorna (chave idempotente), cancela o orçamento e publica `PagamentoEstornado` | Orquestrador conclui: estoque restaurado, OS Cancelada |
-| Gateway fora do ar no estorno | Retry exponencial (3 tentativas) e, na última, publica `EstornoFalhou` com o motivo (nunca falha em silêncio) | Orquestrador sinaliza tratamento manual; o dashboard "Saga da OS" mostra `EstornoFalhou` |
+| Gateway fora do ar no estorno | Retry exponencial (3 por entrega) e, no SQS, redelivery atrasado (1/5/15 min); só no último retry da última redelivery publica `EstornoFalhou` com o motivo (nunca falha em silêncio). Estorno recusado (4xx) publica `EstornoFalhou` na hora | Orquestrador sinaliza tratamento manual; o dashboard "Saga da OS" mostra `EstornoFalhou` |
 | Queda entre gravar e publicar | A reentrega do comando/webhook republica o desfecho já gravado (sem outbox) | Idempotência por `ordemServicoId` e `payment_id` |
 | `GerarOrcamento`/`CancelarOrcamento` duplicado | Insert condicional falha; republica o desfecho existente / não altera estado terminal | Sem efeito colateral duplicado |
 

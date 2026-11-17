@@ -53,8 +53,11 @@ public class Orcamento
         {
             if (item.Quantidade <= 0)
                 throw new OrcamentoInvalidoException("Quantidade deve ser positiva");
-            if (item.PrecoUnitario < 0)
-                throw new OrcamentoInvalidoException("Preco unitario nao pode ser negativo");
+            // O Mercado Pago rejeita unit_price 0 e arredonda por item: so precos positivos com ate 2 casas.
+            if (item.PrecoUnitario <= 0)
+                throw new OrcamentoInvalidoException("Preco unitario deve ser positivo");
+            if (decimal.Round(item.PrecoUnitario, 2) != item.PrecoUnitario)
+                throw new OrcamentoInvalidoException("Preco unitario com mais de 2 casas decimais");
         }
 
         var total = Math.Round(lista.Sum(i => i.Subtotal), 2);

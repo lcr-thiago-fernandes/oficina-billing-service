@@ -49,12 +49,20 @@ public class OrcamentoTestes
         act.Should().Throw<OrcamentoInvalidoException>();
     }
 
-    [Fact]
-    public void Gerar_PrecoNegativo_Lanca()
+    [Theory]
+    [InlineData("-0.01", "Preco unitario deve ser positivo")]
+    [InlineData("0", "Preco unitario deve ser positivo")] // MP rejeita unit_price 0
+    [InlineData("10.005", "Preco unitario com mais de 2 casas decimais")] // arredondaria diferente do MP
+    public void Gerar_PrecoInvalido_Lanca(string preco, string motivo)
     {
-        var act = () => Orcamento.Gerar(Guid.NewGuid(), 1, Cliente, new[] { Item(1, -0.01m) }, Agora);
-        act.Should().Throw<OrcamentoInvalidoException>();
+        var p = decimal.Parse(preco, System.Globalization.CultureInfo.InvariantCulture);
+        var act = () => Orcamento.Gerar(Guid.NewGuid(), 1, Cliente, new[] { Item(1, p) }, Agora);
+        act.Should().Throw<OrcamentoInvalidoException>().Which.Motivo.Should().Be(motivo);
     }
+
+    [Fact]
+    public void Gerar_PrecoComZerosAMais_Aceita() =>
+        Orcamento.Gerar(Guid.NewGuid(), 1, Cliente, new[] { Item(1, 10.5000m) }, Agora).ValorTotal.Should().Be(10.50m);
 
     [Fact]
     public void Gerar_DocumentoVazio_Lanca()

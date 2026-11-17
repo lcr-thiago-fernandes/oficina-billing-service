@@ -3,6 +3,7 @@ using Amazon.SimpleNotificationService;
 using Amazon.SQS;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Oficina.Billing.Infraestrutura.Mensageria.Consumidores;
 
 namespace Oficina.Billing.Infraestrutura.Mensageria;
@@ -27,11 +28,17 @@ public static partial class ConfiguracaoMensageria
                 $"Valor de {OpcoesMensageria.Secao}:PrefixoAmbiente invalido: '{prefixo}'. " +
                 "Use apenas letras minusculas, digitos e '-' (ex.: local, hml, prd).");
 
+        var redeliveryAtrasado = string.Equals(opcoes.Transporte, TransporteAmazonSqs, StringComparison.OrdinalIgnoreCase);
+        // O consumidor de EstornarPagamento so desiste no ultimo retry da ultima redelivery configurada aqui.
+        x.RemoveAll<PoliticaTentativasComandos>();
+        x.AddSingleton(new PoliticaTentativasComandos(EstornarPagamentoConsumidor.LimiteRetry,
+            redeliveryAtrasado ? EstornarPagamentoConsumidor.LimiteRedelivery : 0));
+
         x.AddConsumer<GerarOrcamentoConsumidor>();
         x.AddConsumer<CancelarOrcamentoConsumidor>();
         x.AddConsumer<EstornarPagamentoConsumidor>();
 
-        if (string.Equals(opcoes.Transporte, TransporteAmazonSqs, StringComparison.OrdinalIgnoreCase))
+        if (redeliveryAtrasado)
         {
             x.UsingAmazonSqs((ctx, cfg) =>
             {
@@ -80,6 +87,7 @@ public static partial class ConfiguracaoMensageria
             e.PublishFaults = false;
             var baseRedelivery = opcoes.IntervaloBaseRedelivery;
             if (redeliveryAtrasado)
+                // 3 intervalos = EstornarPagamentoConsumidor.LimiteRedelivery (ultima tentativa do estorno).
                 e.UseDelayedRedelivery(r => r.Intervals(baseRedelivery, baseRedelivery * 5, baseRedelivery * 15));
             var minimo = opcoes.IntervaloMinimoRetry;
             e.UseMessageRetry(r => r.Exponential(EstornarPagamentoConsumidor.LimiteRetry, minimo, minimo * 30, minimo * 5));

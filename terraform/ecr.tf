@@ -1,7 +1,10 @@
 resource "aws_ecr_repository" "billing" {
-  name                 = local.nome_servico
-  image_tag_mutability = "IMMUTABLE" # tag = SHA do commit (cd.yml): nunca sobrescrita.
-  force_delete         = true        # demo: destroy mesmo com imagens.
+  name = local.nome_servico
+  # MUTABLE (igual ao oficina-execucao-service): a tag e o SHA do commit (cd.yml), entao re-run do CD no mesmo commit
+  # (Re-run jobs, workflow_dispatch, re-run apos preencher AWS_DEPLOY_ROLE_ARN ou trocar o segredo do MP) refaz o push
+  # da mesma tag. Com IMMUTABLE o push falharia (ImageTagAlreadyExistsException) antes de atualizar Secret/ConfigMap.
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true # demo: destroy mesmo com imagens.
 
   image_scanning_configuration {
     scan_on_push = true

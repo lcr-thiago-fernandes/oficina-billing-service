@@ -63,7 +63,7 @@ public static class InjecaoDeDependencia
         }
         else
         {
-            // Singleton unico: o endpoint do simulador registra pagamentos que o processamento consulta depois.
+            // Sem estado entre pods: o id do pagamento simulado e autodescritivo (ver GatewayPagamentoSimulado).
             servicos.AddSingleton<GatewayPagamentoSimulado>();
             servicos.AddSingleton<IGatewayPagamento>(sp => sp.GetRequiredService<GatewayPagamentoSimulado>());
         }

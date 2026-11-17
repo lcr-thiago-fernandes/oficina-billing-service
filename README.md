@@ -88,7 +88,7 @@ sequenceDiagram
     alt estorno concluído
         B->>B: pagamento Estornado, orçamento Cancelado
         B->>S: PagamentoEstornado
-    else gateway indisponível após 3 tentativas
+    else gateway indisponível após retries e redeliveries, ou estorno recusado (4xx, na hora)
         B->>S: EstornoFalhou (motivo)
     end
 ```
@@ -100,16 +100,19 @@ JWT (HS256, `iss=oficina-auth`, `aud=oficina-api`). Via API Gateway o prefixo é
 | Método | Rota | Descrição | Respostas |
 |---|---|---|---|
 | GET | `/billing/api/v1/orcamentos/{osId}` | Consulta o orçamento | 200, 404 |
-| POST | `/billing/api/v1/orcamentos/{osId}/aprovacao` | Aprova e devolve o link de pagamento (idempotente) | 200, 404, 409 |
+| POST | `/billing/api/v1/orcamentos/{osId}/aprovacao` | Aprova e devolve o link de pagamento (idempotente) | 200, 404, 409, 502 (Mercado Pago indisponível) |
 | POST | `/billing/api/v1/orcamentos/{osId}/rejeicao` | Rejeita o orçamento | 200, 404, 409 |
 | GET | `/billing/api/v1/pagamentos/{osId}` | Lista os pagamentos da OS | 200, 404 |
-| POST | `/billing/webhooks/mercadopago` | Webhook do Mercado Pago (anônimo, valida `x-signature`) | 200, 400, 401 |
-| POST | `/billing/api/v1/simulador/pagamentos/{osId}` | Só no modo `Simulado`, perfil Admin: registra pagamento `aprovado`/`recusado` | 200, 400, 409 |
+| POST | `/billing/webhooks/mercadopago` | Webhook do Mercado Pago (anônimo, valida `x-signature`) | 200, 400, 401, 500 (falha transitória: gateway fora ou conflito de concorrência; o MP reenvia) |
+| POST | `/billing/api/v1/simulador/pagamentos/{osId}` | Só no modo `Simulado`, perfil Admin: registra pagamento `aprovado`/`recusado` | 200, 400, 404, 409 |
 | GET | `/billing/health` | Saúde (anônimo) | 200 |
 | GET | `/billing/swagger` | Swagger UI (anônimo); JSON em `/billing/swagger/v1/swagger.json` | 200 |
 
 Perfil **Cliente** só acessa o que é seu (o `documento` do token tem de casar com o do orçamento; não-dono
-recebe 404, Cliente sem `documento` recebe 403); Atendente e Admin acessam tudo. Sem token: 401.
+recebe 404, Cliente sem `documento` recebe 403); Atendente e Admin acessam tudo. Sem token: 401; perfil sem
+permissão para a rota (ex.: simulador fora de Admin): 403. Em qualquer rota, o middleware de exceções devolve
+`application/problem+json`: 422 para regra de domínio violada, 409 para conflito de concorrência, 502 para Mercado
+Pago indisponível e 500 para erro inesperado.
 Roteiro de chamadas: [`http/billing.http`](http/billing.http).
 
 ## Por que DynamoDB e por que não há outbox
@@ -163,8 +166,13 @@ API em `http://localhost:8082/billing` (Swagger em `/billing/swagger`), roteiro 
 
 `Pagamento__Modo=Simulado` troca o Mercado Pago por um gateway em memória (sem rede nem credenciais). Regras: hml é
 sempre `Simulado`; prd usa `MercadoPago`, mas cai para `Simulado` com aviso enquanto o segredo do Mercado Pago for o
-placeholder do Terraform. Para demonstrar a compensação, suba com `Pagamento__SimularFalhaEstorno=true`: todo
-estorno falha como indisponibilidade e, após 3 tentativas, o serviço publica `EstornoFalhou`.
+placeholder do Terraform. O gateway simulado não guarda estado entre pods: o id do pagamento
+(`sim-{a|r}-{osId}-{valor}-{nonce}`) carrega o resultado, a OS e o valor, então qualquer réplica consulta e estorna
+um pagamento emitido por outra, e ids nunca se repetem após um redeploy. Para demonstrar a compensação, suba com
+`Pagamento__SimularFalhaEstorno=true`: todo estorno falha como indisponibilidade e o serviço publica `EstornoFalhou`
+depois de esgotar os retries (3 imediatos por entrega) e, no SQS, os 3 redeliveries atrasados (1, 5 e 15 min); com
+`Mensageria__Transporte=InMemory` não há redelivery, então basta esgotar os retries. Se o gateway **recusar** o
+estorno (4xx do Mercado Pago, que não adianta repetir), `EstornoFalhou` é publicado na hora, sem novas tentativas.
 
 ## Configuração do Mercado Pago
 
@@ -182,8 +190,9 @@ aws secretsmanager put-secret-value --secret-id oficina/billing/mercadopago_webh
 ```
 
 5. **Reexecute o CD** (`cd.yml`, branch `main`): ele lê os segredos, recria o Secret do K8s e sobe prd com
-   `Pagamento__Modo=MercadoPago`. O webhook só é aceito com `x-signature` válida (HMAC-SHA256 do manifesto
-   `id;request-id;ts`).
+   `Pagamento__Modo=MercadoPago`. O webhook só é aceito com `x-signature` válida: HMAC-SHA256, com a assinatura secreta, do manifesto
+   `id:<data.id em minúsculas>;request-id:<x-request-id>;ts:<ts>;` (os pares `id` e `request-id` ausentes são
+   omitidos do manifesto).
 
 ## Testes
 
@@ -219,7 +228,7 @@ publicado a cada execução do CI como artefato `coverage-report`
 - Qualidade de código (job `sonar`), em dois modos:
   - **Sem `SONAR_TOKEN` (situação atual, não há conta SonarCloud):** o job sobe um SonarQube Community **efêmero** como service container (`sonarqube:26.10.0.133078-community`), troca a senha padrão do admin por uma aleatória, gera um token, cria o projeto e roda `dotnet-sonarscanner` com cobertura OpenCover e resultados de teste (trx). Depois consulta o quality gate (o job **falha** se o status for `ERROR`) e publica cobertura, bugs, vulnerabilidades, code smells e duplicação no **resumo da execução do CI** (aba *Summary* do job `sonar`) e no artefato `sonar-summary`. O servidor é descartado ao fim do job: não há dashboard persistente, a evidência é o resumo/artefato de cada execução. Exemplo: [execução 44071898261](https://github.com/lcr-thiago-fernandes/oficina-billing-service/actions/runs/44071898261): quality gate `OK`, cobertura 93,1%, 0 bugs, 0 vulnerabilidades, 0 hotspots, 11 code smells, 0% de duplicação, ratings A/A/A, 2.278 linhas de código.
   - **Com `SONAR_TOKEN` (secret) e `SONAR_ORGANIZATION` (variável):** a análise vai para o SonarCloud (`sonar.qualitygate.wait=true`), projeto `<owner>_<repositório>`.
-- CD ([`cd.yml`](.github/workflows/cd.yml)): imagem no ECR e deploy em `oficina-hml` (develop) e `oficina-prd` (main); pula o deploy com aviso enquanto o secret `AWS_DEPLOY_ROLE_ARN` não existir. Manifestos em [`k8s/`](k8s/README.md).
+- CD ([`cd.yml`](.github/workflows/cd.yml)): imagem no ECR e deploy em `oficina-hml` (develop) e `oficina-prd` (main); pula o deploy com aviso enquanto o secret `AWS_DEPLOY_ROLE_ARN` não existir. Manifestos em [`k8s/`](k8s/README.md). O repositório ECR é `MUTABLE` (igual ao `oficina-execucao-service`): a tag é o SHA do commit, então reexecutar o CD no mesmo commit sobrescreve a tag em vez de falhar no `docker push`; nesse caso o CD faz `rollout restart` para os pods lerem o Secret/ConfigMap atualizados.
 - Infra própria em [`terraform/`](terraform) (`infra.yml`): ECR, DynamoDB, IRSA, segredos do Mercado Pago, NLB (8081 prd, 8082 hml) e rotas `/billing` no API Gateway. **Desvio consciente da spec §8 (D13):** `infra.yml` roda `validar` (fmt/validate, sem AWS) em PR e `plan` só no push, porque a trust da role `oficina-gha-infra` aceita apenas `main`/`develop`.
 - Branches `main` e `develop` protegidas (PR, 1 aprovação, checks `build-test`, `docker-build`, `codeql` e `sonar`, sem force push): [`scripts/setup-branch-protection.sh`](scripts/setup-branch-protection.sh).
 

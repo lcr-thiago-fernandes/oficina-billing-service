@@ -38,7 +38,7 @@ public class GatewayPagamentoSimuladoTestes
 
         var id = gateway.RegistrarPagamento(osId, 191.00m, aprovado: true);
 
-        id.Should().MatchRegex("^sim-[0-9]+$");
+        id.Should().MatchRegex("^sim-a-[0-9a-f]{32}-191.00-[0-9a-f]{32}$");
         var pagamento = await gateway.ObterPagamentoAsync(id, default);
         pagamento.Should().Be(new PagamentoGateway(id, osId, StatusPagamentoGateway.Aprovado, null, 191.00m, "simulado"));
     }
@@ -91,7 +91,60 @@ public class GatewayPagamentoSimuladoTestes
         (await gateway.ObterPagamentoAsync(id, default))!.Status.Should().Be(StatusPagamentoGateway.Aprovado);
     }
 
+    [Theory]
+    [InlineData("sim-999")]
+    [InlineData("sim-x-00000000000000000000000000000000-1-00000000000000000000000000000000")]
+    [InlineData("sim-a-nao-guid-1-00000000000000000000000000000000")]
+    [InlineData("123456")]
+    public async Task ObterDesconhecido_Null(string id) =>
+        (await Criar().ObterPagamentoAsync(id, default)).Should().BeNull();
+
     [Fact]
-    public async Task ObterDesconhecido_Null() =>
-        (await Criar().ObterPagamentoAsync("sim-999", default)).Should().BeNull();
+    public async Task EstornarIdInvalido_Lanca()
+    {
+        var acao = () => Criar().EstornarAsync("sim-999", 1m, "estorno-sim-999", default);
+
+        await acao.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task OutraInstancia_ConsultaEEstornaPagamentoEmitidoPelaPrimeira()
+    {
+        // Duas replicas (ou a mesma apos um redeploy): nenhum estado compartilhado em memoria.
+        var podA = Criar();
+        var podB = Criar();
+        var osId = Guid.NewGuid();
+        var aprovado = podA.RegistrarPagamento(osId, 191.00m, aprovado: true);
+        var recusado = podA.RegistrarPagamento(osId, 191.00m, aprovado: false);
+
+        (await podB.ObterPagamentoAsync(aprovado, default)).Should()
+            .Be(new PagamentoGateway(aprovado, osId, StatusPagamentoGateway.Aprovado, null, 191.00m, "simulado"));
+        (await podB.ObterPagamentoAsync(recusado, default)).Should()
+            .Be(new PagamentoGateway(recusado, osId, StatusPagamentoGateway.Recusado, "cc_rejected_simulado", 191.00m,
+                "simulado"));
+
+        var estorno = await podB.EstornarAsync(aprovado, 191.00m, $"estorno-{aprovado}", default);
+
+        estorno.Should().Be(new EstornoGateway($"sim-estorno-{aprovado}", 191.00m));
+        (await podB.ObterPagamentoAsync(aprovado, default))!.Status.Should().Be(StatusPagamentoGateway.Estornado);
+    }
+
+    [Fact]
+    public void DuasInstancias_PagamentosConsecutivosNuncaColidem()
+    {
+        // Antes: sim-1, sim-2... reiniciavam por pod/redeploy e colidiam com WEBHOOK# (90 dias) => OS presa.
+        var podA = Criar();
+        var podB = Criar();
+        var osId = Guid.NewGuid();
+
+        var ids = new[]
+        {
+            podA.RegistrarPagamento(osId, 10m, aprovado: true),
+            podB.RegistrarPagamento(osId, 10m, aprovado: true),
+            Criar().RegistrarPagamento(osId, 10m, aprovado: true),
+            Criar().RegistrarPagamento(Guid.NewGuid(), 10m, aprovado: true),
+        };
+
+        ids.Should().OnlyHaveUniqueItems();
+    }
 }

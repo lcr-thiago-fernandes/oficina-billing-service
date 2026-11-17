@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Amazon.Runtime;
 using Amazon.SimpleNotificationService;
 using Amazon.SimpleNotificationService.Model;
@@ -9,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Oficina.Billing.Aplicacao;
 using Oficina.Billing.Aplicacao.Mensagens;
 using Oficina.Billing.Aplicacao.Portas;
+using Oficina.Billing.Dominio.Pagamentos;
 using Oficina.Billing.Infraestrutura.Mensageria;
 using Testcontainers.LocalStack;
 
@@ -32,6 +34,8 @@ public sealed class LocalStackFixture : IAsyncLifetime
     public IAmazonSimpleNotificationService Sns { get; private set; } = null!;
     public IAmazonSQS Sqs { get; private set; } = null!;
     internal RepositorioQueLanca Repositorio { get; } = new();
+    internal GatewayFalhaTransitoria Gateway { get; } = new();
+    internal PublicadorGravador Publicador { get; } = new();
 
     public async Task InitializeAsync()
     {
@@ -57,6 +61,9 @@ public sealed class LocalStackFixture : IAsyncLifetime
         services.AdicionarAplicacao();
         services.AdicionarInfraestrutura(configuracao);
         services.AddSingleton<IRepositorioBilling>(Repositorio);
+        // Estorno: gateway que falha nas N primeiras chamadas e publicador que grava o desfecho (sem SNS).
+        services.AddSingleton<IGatewayPagamento>(Gateway);
+        services.AddScoped<IPublicadorMensagens>(_ => Publicador);
         _provider = services.BuildServiceProvider(true);
 
         Bus = _provider.GetRequiredService<IBusControl>();
@@ -193,5 +200,77 @@ public sealed class TopologiaLocalStackTestes(LocalStackFixture fx) : IClassFixt
         // Pode estar vazia se este teste rodar antes do de publicacao: nenhum topico fora do padrao, nenhum Fault.
         topicos.Should().NotContain(t => !t.StartsWith("test-oficina-saga-"));
         topicos.Should().NotContain(t => t.Contains("Fault"));
+    }
+
+    [Fact]
+    public async Task AmazonSqs_EstornoComGatewayForaNaPrimeiraEntrega_EstornaNoRedeliverySemEstornoFalhou()
+    {
+        // Antes: o contador de retry reinicia a cada redelivery e GetRetryAttempt() >= 3 encerrava ja na 1a entrega
+        // (~20 s de indisponibilidade viravam EstornoFalhou terminal). Agora so o ultimo retry da ultima redelivery.
+        var osId = Guid.NewGuid();
+        var pagamentoId = $"mp-{Guid.NewGuid():N}";
+        fx.Repositorio.Pagamentos[pagamentoId] = Pagamento.Registrar(pagamentoId, osId, 191.00m, "pix",
+            StatusPagamento.Aprovado, null, Agora);
+        fx.Gateway.FalharNasPrimeiras(pagamentoId, 4); // entrega inicial + 3 retries imediatos
+
+        await (await fx.Bus.GetSendEndpoint(new Uri("queue:test-oficina-billing-comandos")))
+            .Send(new EstornarPagamento { OrdemServicoId = osId, OcorridoEm = Agora, Motivo = "Falha na execucao" });
+
+        var fim = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+        while (DateTime.UtcNow < fim && !fx.Publicador.Publicadas.Any(m => Da(m, osId)))
+            await Task.Delay(200);
+
+        var desfechos = fx.Publicador.Publicadas.Where(m => Da(m, osId)).ToList();
+        desfechos.Should().ContainSingle().Which.Should().BeOfType<PagamentoEstornado>()
+            .Which.PagamentoId.Should().Be(pagamentoId);
+        fx.Gateway.Chamadas(pagamentoId).Should().Be(5, "4 falhas na 1a entrega + sucesso no 1o redelivery");
+        fx.Repositorio.Pagamentos[pagamentoId].Status.Should().Be(StatusPagamento.Estornado);
+    }
+
+    private static bool Da(object mensagem, Guid osId) => mensagem switch
+    {
+        PagamentoEstornado e => e.OrdemServicoId == osId,
+        EstornoFalhou f => f.OrdemServicoId == osId,
+        _ => false,
+    };
+}
+
+/// <summary>Gateway que lanca indisponibilidade nas N primeiras chamadas de estorno de um pagamento.</summary>
+internal sealed class GatewayFalhaTransitoria : IGatewayPagamento
+{
+    private readonly ConcurrentDictionary<string, int> _falhas = new();
+    private readonly ConcurrentDictionary<string, int> _chamadas = new();
+
+    public string Nome => "Teste";
+
+    public void FalharNasPrimeiras(string pagamentoId, int vezes) => _falhas[pagamentoId] = vezes;
+
+    public int Chamadas(string pagamentoId) => _chamadas.GetValueOrDefault(pagamentoId);
+
+    public Task<CobrancaCriada> CriarCobrancaAsync(NovaCobranca cobranca, CancellationToken ct) =>
+        throw new NotSupportedException();
+
+    public Task<PagamentoGateway?> ObterPagamentoAsync(string pagamentoId, CancellationToken ct) =>
+        Task.FromResult<PagamentoGateway?>(null);
+
+    public Task<EstornoGateway> EstornarAsync(string pagamentoId, decimal valor, string chaveIdempotencia,
+        CancellationToken ct)
+    {
+        var chamada = _chamadas.AddOrUpdate(pagamentoId, 1, (_, n) => n + 1);
+        if (chamada <= _falhas.GetValueOrDefault(pagamentoId))
+            throw new GatewayPagamentoIndisponivelException("indisponivel (teste)");
+        return Task.FromResult(new EstornoGateway($"est-{pagamentoId}", valor));
+    }
+}
+
+/// <summary>Grava as mensagens publicadas pelos casos de uso (sem passar pelo SNS).</summary>
+internal sealed class PublicadorGravador : IPublicadorMensagens
+{
+    public ConcurrentQueue<object> Publicadas { get; } = new();
+
+    public Task PublicarAsync<T>(T mensagem, CancellationToken ct) where T : class
+    {
+        Publicadas.Enqueue(mensagem);
+        return Task.CompletedTask;
     }
 }

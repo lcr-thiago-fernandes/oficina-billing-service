@@ -106,7 +106,8 @@ jobs:
         if: env.PULAR != 'true'
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 5) Build + push da imagem (tag = SHA do commit).
+      # 5) Build + push da imagem (tag = SHA do commit). O ECR e MUTABLE (terraform/ecr.tf): re-run no mesmo
+      #    commit sobrescreve a tag em vez de falhar no push.
       - name: Build e push da imagem
         if: env.PULAR != 'true'
         run: |
@@ -177,7 +178,13 @@ jobs:
           fi
           export PAGAMENTO_MODO
 
-          kubectl create secret generic oficina-billing-secret             --namespace "$NAMESPACE"             --from-literal=Jwt__Secret="${JWT_SECRET}"             --from-literal=NewRelic__LicenseKey="${NR_KEY}"             --from-literal=MercadoPago__AccessToken="${MP_TOKEN}"             --from-literal=MercadoPago__WebhookSecret="${MP_WEBHOOK}"             --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic oficina-billing-secret \
+            --namespace "$NAMESPACE" \
+            --from-literal=Jwt__Secret="${JWT_SECRET}" \
+            --from-literal=NewRelic__LicenseKey="${NR_KEY}" \
+            --from-literal=MercadoPago__AccessToken="${MP_TOKEN}" \
+            --from-literal=MercadoPago__WebhookSecret="${MP_WEBHOOK}" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
           envsubst '${NAMESPACE} ${AMBIENTE} ${TABELA_DYNAMODB} ${PAGAMENTO_MODO} ${URL_NOTIFICACAO}' < k8s/configmap.yaml | kubectl apply -f -
 
@@ -187,7 +194,14 @@ jobs:
         if: env.PULAR != 'true'
         run: |
           set -euo pipefail
+          IMAGEM_ATUAL=$(kubectl -n "$NAMESPACE" get deployment/oficina-billing \
+            -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
           envsubst '${ECR_REPOSITORY} ${IMAGE_TAG} ${NAMESPACE} ${AMBIENTE}' < k8s/deployment.yaml | kubectl apply -f -
+          # Re-run no mesmo commit: a imagem nao muda e o apply nao recria os pods; reinicia para ler o
+          # Secret/ConfigMap atualizados no passo 8 (ex.: Pagamento__Modo apos trocar o segredo do Mercado Pago).
+          if [ "$IMAGEM_ATUAL" = "$ECR_REPOSITORY:$IMAGE_TAG" ]; then
+            kubectl -n "$NAMESPACE" rollout restart deployment/oficina-billing
+          fi
           envsubst '${NAMESPACE} ${NODE_PORT}' < k8s/service.yaml | kubectl apply -f -
           envsubst '${NAMESPACE}' < k8s/hpa.yaml | kubectl apply -f -
 
