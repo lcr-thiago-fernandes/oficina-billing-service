@@ -1,0 +1,62 @@
+# Uso (da raiz do repo): cp .env.example .env && docker compose --env-file .env -f docker/docker-compose.yml up -d --build --wait
+name: oficina-billing
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:2.5.2
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8000:8000"
+
+  localstack:
+    image: localstack/localstack:3.8.1
+    environment:
+      SERVICES: sqs,sns
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  billing-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      # 8080 e do oficina-app e 8081 do adminer dele.
+      - "8082:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Jwt__Secret: ${JWT_SECRET:?defina JWT_SECRET (copie .env.example para .env)}
+      Jwt__Issuer: oficina-auth
+      Jwt__Audience: oficina-api
+      Mensageria__Transporte: AmazonSqs
+      Mensageria__PrefixoAmbiente: local
+      Mensageria__ServiceUrl: http://localstack:4566
+      Dynamo__ServiceUrl: http://dynamodb:8000
+      Dynamo__CriarTabelaSeAusente: "true"
+      Dynamo__NomeTabela: oficina-billing-local
+      Pagamento__Modo: ${PAGAMENTO_MODO:-Simulado}
+      MercadoPago__AccessToken: ${MP_ACCESS_TOKEN:-}
+      MercadoPago__WebhookSecret: ${MP_WEBHOOK_SECRET:-}
+      MercadoPago__UrlNotificacao: ${MP_URL_NOTIFICACAO:-}
+      NEW_RELIC_APP_NAME: oficina-billing
+      # Credenciais ficticias: DynamoDB Local e LocalStack nao validam, mas o SDK AWS exige alguma.
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+    depends_on:
+      dynamodb:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 20s
+      retries: 5

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-billing-config
+  namespace: ${NAMESPACE}
+  labels:
+    app: oficina-billing
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  # Emissor/audiência do JWT (não sensíveis); devem bater com o token emitido pela
+  # função de autenticação.
+  Jwt__Issuer: "oficina-auth"
+  Jwt__Audience: "oficina-api"
+  # Mensageria: SQS/SNS reais; AMBIENTE (hml|prd) prefixa filas/tópicos do ambiente.
+  # O nome da fila por instância do barramento usa a env HOSTNAME (nome do pod, que o
+  # Kubernetes define sozinho).
+  Mensageria__Transporte: "AmazonSqs"
+  Mensageria__PrefixoAmbiente: "${AMBIENTE}"
+  Mensageria__Regiao: "us-east-1"
+  AWS_REGION: "us-east-1"
+  # DynamoDB: a tabela é criada pelo Terraform (SSM /oficina/billing/<amb>/tabela_dynamodb).
+  Dynamo__NomeTabela: "${TABELA_DYNAMODB}"
+  # hml: sempre Simulado; prd: MercadoPago (ou Simulado enquanto o segredo for placeholder).
+  Pagamento__Modo: "${PAGAMENTO_MODO}"
+  MercadoPago__UrlNotificacao: "${URL_NOTIFICACAO}"

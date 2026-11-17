@@ -43,3 +43,13 @@ docs/superpowers/
 
 ## Roteiro do video (artefato de preparacao — nao versionar)
 docs/entrega/roteiro-video-fase2.md
+
+# Reqnroll (gerado no build)
+*.feature.cs
+
+# Terraform
+.terraform/
+*.tfstate*
+tfplan
+*.tfvars
+!exemplo.tfvars

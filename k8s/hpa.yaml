@@ -1,0 +1,24 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: oficina-billing
+  namespace: ${NAMESPACE}
+  labels:
+    app: oficina-billing
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: oficina-billing
+  minReplicas: 2
+  maxReplicas: 5
+  # Só CPU, mesmo racional do oficina-app: com o agente do New Relic ligado o RSS em
+  # repouso já ultrapassa uma meta de memória calculada sobre requests.memory, e o HPA
+  # escalaria direto até o máximo.
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
