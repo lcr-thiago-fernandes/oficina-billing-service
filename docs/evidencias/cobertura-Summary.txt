@@ -1,0 +1,82 @@
+Summary
+  Generated on: 17/11/2026 - 08:22:33
+  Coverage date: 17/11/2026 - 08:21:13 - 17/11/2026 - 08:22:02
+  Parser: MultiReport (5x Cobertura)
+  Assemblies: 4
+  Classes: 54
+  Files: 50
+  Line coverage: 96.9%
+  Covered lines: 1176
+  Uncovered lines: 37
+  Coverable lines: 1213
+  Total lines: 2442
+  Branch coverage: 90.5% (404 of 446)
+  Covered branches: 404
+  Total branches: 446
+  Method coverage: 98.2% (168 of 171)
+  Full method coverage: 88.8% (152 of 171)
+  Covered methods: 168
+  Fully covered methods: 152
+  Total methods: 171
+
+Oficina.Billing.Api                                                                                                                                     93%
+  Oficina.Billing.Api.Configuracao.ConfiguracaoJwt                                                                                                     100%
+  Oficina.Billing.Api.Configuracao.ConfiguracaoSwagger                                                                                                 100%
+  Oficina.Billing.Api.Configuracao.ExtensoesClaims                                                                                                     100%
+  Oficina.Billing.Api.Configuracao.MiddlewareDeCorrelacao                                                                                             87.5%
+  Oficina.Billing.Api.Configuracao.MiddlewareDeExcecoes                                                                                               66.6%
+  Oficina.Billing.Api.Configuracao.PoliticasDeAutorizacao                                                                                              100%
+  Oficina.Billing.Api.Controllers.HealthController                                                                                                     100%
+  Oficina.Billing.Api.Controllers.OrcamentosController                                                                                                 100%
+  Oficina.Billing.Api.Controllers.PagamentosController                                                                                                 100%
+  Oficina.Billing.Api.Controllers.WebhookMercadoPagoController                                                                                          96%
+  Oficina.Billing.Api.Simulador.EndpointsSimulador                                                                                                     100%
+
+Oficina.Billing.Aplicacao                                                                                                                             99.3%
+  Oficina.Billing.Aplicacao.CasosDeUso.AprovarOrcamentoCasoDeUso                                                                                       100%
+  Oficina.Billing.Aplicacao.CasosDeUso.CancelarOrcamentoCasoDeUso                                                                                      100%
+  Oficina.Billing.Aplicacao.CasosDeUso.ConcorrenciaException                                                                                           100%
+  Oficina.Billing.Aplicacao.CasosDeUso.ConsultarOrcamentoCasoDeUso                                                                                     100%
+  Oficina.Billing.Aplicacao.CasosDeUso.ConsultarPagamentosCasoDeUso                                                                                    100%
+  Oficina.Billing.Aplicacao.CasosDeUso.EstornarPagamentoCasoDeUso                                                                                      100%
+  Oficina.Billing.Aplicacao.CasosDeUso.GerarOrcamentoCasoDeUso                                                                                         100%
+  Oficina.Billing.Aplicacao.CasosDeUso.OrcamentoNaoEncontradoException                                                                                 100%
+  Oficina.Billing.Aplicacao.CasosDeUso.OrcamentoResposta                                                                                               100%
+  Oficina.Billing.Aplicacao.CasosDeUso.PagamentoResposta                                                                                               100%
+  Oficina.Billing.Aplicacao.CasosDeUso.ProcessarNotificacaoPagamentoCasoDeUso                                                                         98.3%
+  Oficina.Billing.Aplicacao.CasosDeUso.RejeitarOrcamentoCasoDeUso                                                                                      100%
+  Oficina.Billing.Aplicacao.CasosDeUso.Solicitante                                                                                                     100%
+  Oficina.Billing.Aplicacao.InjecaoDeDependencia                                                                                                       100%
+  Oficina.Billing.Aplicacao.Mensagens.ContratosSaga                                                                                                    100%
+  Oficina.Billing.Aplicacao.Mensagens.OpcoesJsonContrato                                                                                               100%
+  Oficina.Billing.Aplicacao.Portas.GatewayPagamentoIndisponivelException                                                                               100%
+
+Oficina.Billing.Dominio                                                                                                                                100%
+  Oficina.Billing.Dominio.Comum.DocumentoBr                                                                                                            100%
+  Oficina.Billing.Dominio.Comum.DominioException                                                                                                       100%
+  Oficina.Billing.Dominio.Comum.OrcamentoInvalidoException                                                                                             100%
+  Oficina.Billing.Dominio.Comum.TransicaoInvalidaException                                                                                             100%
+  Oficina.Billing.Dominio.Orcamentos.ItemOrcamento                                                                                                     100%
+  Oficina.Billing.Dominio.Orcamentos.Orcamento                                                                                                         100%
+  Oficina.Billing.Dominio.Pagamentos.Pagamento                                                                                                         100%
+
+Oficina.Billing.Infraestrutura                                                                                                                        96.5%
+  Oficina.Billing.Infraestrutura.InjecaoDeDependencia                                                                                                  100%
+  Oficina.Billing.Infraestrutura.Mensageria.ConfiguracaoMensageria                                                                                     100%
+  Oficina.Billing.Infraestrutura.Mensageria.Consumidores.CancelarOrcamentoConsumidor                                                                   100%
+  Oficina.Billing.Infraestrutura.Mensageria.Consumidores.EstornarPagamentoConsumidor                                                                   100%
+  Oficina.Billing.Infraestrutura.Mensageria.Consumidores.GerarOrcamentoConsumidor                                                                      100%
+  Oficina.Billing.Infraestrutura.Mensageria.FiltroLogOrdemServico<T>                                                                                  88.8%
+  Oficina.Billing.Infraestrutura.Mensageria.OpcoesMensageria                                                                                           100%
+  Oficina.Billing.Infraestrutura.Mensageria.PublicadorMassTransit                                                                                      100%
+  Oficina.Billing.Infraestrutura.Mensageria.TopologiaSaga                                                                                              100%
+  Oficina.Billing.Infraestrutura.MercadoPago.MercadoPagoGateway                                                                                       96.7%
+  Oficina.Billing.Infraestrutura.MercadoPago.ValidadorAssinaturaMercadoPago                                                                            100%
+  Oficina.Billing.Infraestrutura.Persistencia.InicializadorTabelaDynamo                                                                               81.4%
+  Oficina.Billing.Infraestrutura.Persistencia.MapeadorItens                                                                                            100%
+  Oficina.Billing.Infraestrutura.Persistencia.RepositorioBillingDynamo                                                                                97.8%
+  Oficina.Billing.Infraestrutura.Simulador.GatewayPagamentoSimulado                                                                                   93.7%
+  Oficina.Billing.Infraestrutura.Telemetria.TelemetriaPagamentoNewRelic                                                                                 80%
+  System.Text.RegularExpressions.Generated                                                                                                            95.2%
+  System.Text.RegularExpressions.Generated.<RegexGenerator_g>FACFFDA3EAF54A0499B681322D1635656A761D38F70BC2B61A06FBEA7791EA7E5__CaractereInvalido_1    100%
+  System.Text.RegularExpressions.Generated.<RegexGenerator_g>FACFFDA3EAF54A0499B681322D1635656A761D38F70BC2B61A06FBEA7791EA7E5__PrefixoValido_0       91.6%
