@@ -72,6 +72,11 @@
           "System.Diagnostics.EventLog": "6.0.0"
         }
       },
+      "MassTransit.Abstractions": {
+        "type": "Transitive",
+        "resolved": "8.5.12",
+        "contentHash": "NauNyaQsJVfLSY3Jw/zr26POQpEnfjerHCrrK3kUmkCDIpC63PZD1AjihGFgq0KH5eGagMJ7GRHN74w8mI69Kg=="
+      },
       "Microsoft.AspNetCore.TestHost": {
         "type": "Transitive",
         "resolved": "8.0.10",
@@ -468,6 +473,7 @@
       "oficina.billing.aplicacao": {
         "type": "Project",
         "dependencies": {
+          "MassTransit.Abstractions": "[8.5.12, )",
           "Oficina.Billing.Dominio": "[1.0.0, )"
         }
       },
