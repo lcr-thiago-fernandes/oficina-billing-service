@@ -84,6 +84,7 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
         var eventoTipo = EventoNenhum;
         string? motivo = null;
         var estornoAutomatico = false;
+        var estornoAutomaticoFalhou = false;
 
         if (pg.Status is StatusPagamentoGateway.Aprovado or StatusPagamentoGateway.Estornado)
         {
@@ -110,9 +111,30 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
                 else
                 {
                     // Pagamento que nao pode ser aceito: estorna (chave idempotente) e nunca confirma.
-                    var estorno = await gateway.EstornarAsync(pagamentoId, pg.Valor, $"estorno-{pagamentoId}", ct);
-                    pagamento.Estornar(estorno.EstornoId, agora);
-                    estornoAutomatico = true;
+                    try
+                    {
+                        var estorno = await gateway.EstornarAsync(pagamentoId, pg.Valor, $"estorno-{pagamentoId}", ct);
+                        pagamento.Estornar(estorno.EstornoId, agora);
+                        estornoAutomatico = true;
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        // 4xx do gateway: repetir nao adianta e uma excecao aqui faria o MP reentregar para sempre.
+                        var noGateway = await gateway.ObterPagamentoAsync(pagamentoId, ct);
+                        if (noGateway?.Status == StatusPagamentoGateway.Estornado)
+                        {
+                            pagamento.Estornar(EstornarPagamentoCasoDeUso.EstornoExterno, agora);
+                        }
+                        else
+                        {
+                            // Segue sem estornar: o pagamento permanece Aprovado (pendencia manual) e a saga recebe o
+                            // desfecho abaixo; o registro de webhook encerra a reentrega.
+                            estornoAutomaticoFalhou = true;
+                            logger.LogError(ex,
+                                "Gateway recusou o estorno automatico do pagamento {PagamentoId} da OS {OrdemServicoId}: requer estorno manual",
+                                pagamentoId, ordemServicoId);
+                        }
+                    }
                 }
                 if (orcamentoAguardaPagamento)
                 {
@@ -153,6 +175,9 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
 
         if (estornoAutomatico)
             telemetria.Registrar(new EventoPagamento(ordemServicoId, orcamento.NumeroOs, "EstornoAutomatico", "Sucesso",
+                pagamento.Valor, pagamento.Meio, gateway.Nome));
+        if (estornoAutomaticoFalhou)
+            telemetria.Registrar(new EventoPagamento(ordemServicoId, orcamento.NumeroOs, "EstornoAutomatico", "Falha",
                 pagamento.Valor, pagamento.Meio, gateway.Nome));
         if (eventoTipo != EventoNenhum)
             telemetria.Registrar(new EventoPagamento(ordemServicoId, orcamento.NumeroOs, eventoTipo,

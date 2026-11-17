@@ -177,6 +177,46 @@ public class ProcessarNotificacaoPagamentoTestes
     }
 
     [Fact]
+    public async Task Aprovado_Estorno4xx_GatewayJaMostraEstornado_SegueComoEstornadoExterno()
+    {
+        NoGateway(StatusPagamentoGateway.Aprovado, valor: 100.00m);
+        ComOrcamento(StatusOrcamento.Aprovado);
+        EstornoRecusadoPeloGateway();
+        _gw.SetupSequence(g => g.ObterPagamentoAsync(Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PagamentoGateway(Id, Cenario.OsId, StatusPagamentoGateway.Aprovado, null, 100.00m, "pix"))
+            .ReturnsAsync(new PagamentoGateway(Id, Cenario.OsId, StatusPagamentoGateway.Estornado, null, 100.00m, "pix"));
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Processado);
+        _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Estornado);
+        _desfecho.Pagamento.EstornoId.Should().Be(EstornarPagamentoCasoDeUso.EstornoExterno);
+        _desfecho.Webhook.EventoTipo.Should().Be("PagamentoRecusado");
+        _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoRecusado>(m => m.Motivo == "valor_divergente"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Aprovado_Estorno4xx_GatewayNaoMostraEstornado_RegistraDesfechoSemLoopDeReentrega()
+    {
+        NoGateway(StatusPagamentoGateway.Aprovado, valor: 100.00m);
+        ComOrcamento(StatusOrcamento.Aprovado);
+        EstornoRecusadoPeloGateway();
+
+        var r = await Criar().ExecutarAsync(Id, default);
+
+        r.Should().Be(ResultadoNotificacao.Processado);
+        _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Aprovado);
+        _desfecho.OrcamentoAlterado!.Status.Should().Be(StatusOrcamento.Cancelado);
+        _desfecho.Webhook.EventoTipo.Should().Be("PagamentoRecusado");
+        _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoRecusado>(m => m.Motivo == "valor_divergente"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _pub.Verify(p => p.PublicarAsync(It.IsAny<PagamentoConfirmado>(), It.IsAny<CancellationToken>()), Times.Never);
+        _tel.Verify(t => t.Registrar(It.Is<EventoPagamento>(e => e.Etapa == "EstornoAutomatico" && e.Resultado == "Falha")),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task Pendente_SalvaPagamentoPendenteSemPublicar()
     {
         NoGateway(StatusPagamentoGateway.Pendente);

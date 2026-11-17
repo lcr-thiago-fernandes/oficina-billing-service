@@ -35,7 +35,7 @@ public class MercadoPagoGatewayTestes
         req.Metodo.Should().Be(HttpMethod.Post);
         req.Uri.AbsolutePath.Should().Be("/checkout/preferences");
         req.Cabecalhos.Authorization!.ToString().Should().Be("Bearer TOKEN-SECRETO");
-        req.Cabecalhos.GetValues("X-Idempotency-Key").Should().ContainSingle($"preferencia-{OsId}");
+        req.Cabecalhos.GetValues("X-Idempotency-Key").Should().ContainSingle().Which.Should().Be($"preferencia-{OsId}");
         using var json = JsonDocument.Parse(req.Corpo!);
         var raiz = json.RootElement;
         raiz.GetProperty("external_reference").GetString().Should().Be(OsId.ToString());
@@ -150,7 +150,7 @@ public class MercadoPagoGatewayTestes
         var req = handler.Requisicoes.Single();
         req.Metodo.Should().Be(HttpMethod.Post);
         req.Uri.AbsolutePath.Should().Be("/v1/payments/1325123456/refunds");
-        req.Cabecalhos.GetValues("X-Idempotency-Key").Should().ContainSingle("estorno-1325123456");
+        req.Cabecalhos.GetValues("X-Idempotency-Key").Should().ContainSingle().Which.Should().Be("estorno-1325123456");
         req.Cabecalhos.Authorization!.ToString().Should().Be("Bearer TOKEN-SECRETO");
         req.Corpo.Should().Be("{}");
     }
@@ -165,6 +165,28 @@ public class MercadoPagoGatewayTestes
         var act = () => Criar(handler).EstornarAsync("1", 10m, "estorno-1", CancellationToken.None);
 
         await act.Should().ThrowAsync<GatewayPagamentoIndisponivelException>();
+    }
+
+    [Theory]
+    [InlineData(429)]
+    [InlineData(408)]
+    public async Task Estornar_429e408_LancaIndisponivel(int status)
+    {
+        var handler = HandlerHttpFalso.Json((HttpStatusCode)status, "{}");
+
+        var act = () => Criar(handler).EstornarAsync("1", 10m, "estorno-1", CancellationToken.None);
+
+        await act.Should().ThrowAsync<GatewayPagamentoIndisponivelException>();
+    }
+
+    [Fact]
+    public async Task Estornar_404_JaEstornado_LancaInvalidOperation()
+    {
+        var handler = HandlerHttpFalso.Json(HttpStatusCode.NotFound, """{"message":"Charge already refunded","error":"not_found"}""");
+
+        var act = () => Criar(handler).EstornarAsync("1", 10m, "estorno-1", CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*already refunded*");
     }
 
     [Fact]
