@@ -1,4 +1,5 @@
 using Oficina.Billing.Dominio.Orcamentos;
+using Oficina.Billing.Dominio.Pagamentos;
 
 namespace Oficina.Billing.Aplicacao.CasosDeUso;
 
@@ -13,4 +14,11 @@ public record OrcamentoResposta(Guid OrcamentoId, Guid OrdemServicoId, int Numer
         o.Itens.Select(i => new ItemOrcamentoResposta(i.Tipo.ToString(), i.Descricao, i.Quantidade, i.PrecoUnitario,
             i.Subtotal)).ToList(),
         o.LinkPagamento, o.Motivo, o.CriadoEm, o.AtualizadoEm);
+}
+
+public record PagamentoResposta(string PagamentoId, string Status, decimal Valor, string Meio, string? DetalheStatus,
+    string? EstornoId, DateTime CriadoEm, DateTime AtualizadoEm)
+{
+    public static PagamentoResposta De(Pagamento p) => new(p.Id, p.Status.ToString(), p.Valor, p.Meio,
+        p.DetalheStatus, p.EstornoId, p.CriadoEm, p.AtualizadoEm);
 }

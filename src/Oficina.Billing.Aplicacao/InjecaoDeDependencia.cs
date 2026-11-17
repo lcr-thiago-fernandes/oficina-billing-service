@@ -13,6 +13,9 @@ public static class InjecaoDeDependencia
         servicos.AddScoped<AprovarOrcamentoCasoDeUso>();
         servicos.AddScoped<RejeitarOrcamentoCasoDeUso>();
         servicos.AddScoped<CancelarOrcamentoCasoDeUso>();
+        servicos.AddScoped<ProcessarNotificacaoPagamentoCasoDeUso>();
+        servicos.AddScoped<EstornarPagamentoCasoDeUso>();
+        servicos.AddScoped<ConsultarPagamentosCasoDeUso>();
         return servicos;
     }
 }
