@@ -22,6 +22,7 @@ Funcionalidade: Orçamento e pagamento da ordem de serviço
     E o pagamento é "recusado" no gateway
     Então o evento "PagamentoRecusado" é publicado
     E o orçamento fica com status "Cancelado"
+    E nenhum evento "PagamentoConfirmado" é publicado
 
   Cenário: Pagamento aprovado é estornado quando a execução recusa a OS
     Quando o cliente "52998224725" aprova o orçamento

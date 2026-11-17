@@ -16,6 +16,7 @@ public sealed class FluxoPagamentoOrcamentoPassos(AmbienteBdd ambiente)
     private static readonly TimeSpan Limite = TimeSpan.FromSeconds(15);
 
     private string _cpf = "";
+    private string? _motivoRejeicao;
     private Guid OsId => ambiente.OrdemServicoId;
     private ITestHarness Harness => ambiente.Fabrica.Harness;
 
@@ -58,6 +59,7 @@ public sealed class FluxoPagamentoOrcamentoPassos(AmbienteBdd ambiente)
     [When(@"^o cliente ""(.*)"" rejeita o orçamento com motivo ""(.*)""$")]
     public async Task QuandoClienteRejeita(string cpf, string motivo)
     {
+        _motivoRejeicao = motivo;
         var resposta = await ambiente.Fabrica.Cliente("Cliente", cpf)
             .PostAsJsonAsync($"{Base}/orcamentos/{OsId}/rejeicao", new { motivo });
         resposta.StatusCode.Should().Be(HttpStatusCode.OK, await resposta.Content.ReadAsStringAsync());
@@ -110,12 +112,16 @@ public sealed class FluxoPagamentoOrcamentoPassos(AmbienteBdd ambiente)
     {
         var publicado = evento switch
         {
-            nameof(PagamentoRecusado) => await PublicadoAsync<PagamentoRecusado>(evento, _ => true),
-            nameof(OrcamentoRejeitado) => await PublicadoAsync<OrcamentoRejeitado>(evento, _ => true),
+            nameof(PagamentoRecusado) => await PublicadoAsync<PagamentoRecusado>(evento, m => !string.IsNullOrWhiteSpace(m.Motivo)),
+            nameof(OrcamentoRejeitado) => await PublicadoAsync<OrcamentoRejeitado>(evento, m => m.Motivo == _motivoRejeicao && m.OrcamentoId != Guid.Empty),
             _ => throw new PendingStepException(),
         };
-        publicado.Should().BeTrue($"{evento} deve ser publicado");
+        publicado.Should().BeTrue($"{evento} deve ser publicado com os campos do contrato");
     }
+
+    [Then(@"^nenhum evento ""PagamentoConfirmado"" é publicado$")]
+    public void EntaoNenhumPagamentoConfirmado() =>
+        Harness.Published.Select<PagamentoConfirmado>(x => x.Context.Message.OrdemServicoId == OsId).Should().BeEmpty();
 
     [Then(@"^o pagamento da OS fica com status ""(.*)""$")]
     public async Task EntaoStatusPagamento(string status)
