@@ -16,7 +16,7 @@ RUN dotnet publish src/Oficina.Billing.Api/Oficina.Billing.Api.csproj \
     --no-restore \
     /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS runtime
 WORKDIR /app
 
 # curl instalado minimamente apenas para o HEALTHCHECK do container (o /health e anonimo).
