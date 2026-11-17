@@ -2,10 +2,50 @@
   "version": 1,
   "dependencies": {
     "net8.0": {
+      "AWSSDK.Core": {
+        "type": "Transitive",
+        "resolved": "4.0.103",
+        "contentHash": "DCOotOZU/uuGTJHyhdzDaISArck4hYC6Y9OzZM8/PI+G4AhtNaD1hszFG1Giwdpod0Sn7gxxlx6xUfcPKNeQ8Q=="
+      },
+      "AWSSDK.DynamoDBv2": {
+        "type": "Transitive",
+        "resolved": "4.0.110.3",
+        "contentHash": "y+P8YImYqSuj1uDaO73WQbWqKWcPYeSFujQhRQJMUAaUmeNyfd7kpN8c5y3YixKGNtc2zelKpaJE2BXxquro3A==",
+        "dependencies": {
+          "AWSSDK.Core": "[4.0.103, 5.0.0)"
+        }
+      },
+      "AWSSDK.Extensions.NETCore.Setup": {
+        "type": "Transitive",
+        "resolved": "4.0.102.11",
+        "contentHash": "Do5La48mmDz0MHAkx/4emDeOCqOoHVR7/gqHGkDglucFIkc84TG4aK5SyBkIchmM0UqV6JiNZBhJDiGtIOYVKw==",
+        "dependencies": {
+          "AWSSDK.Core": "4.0.103",
+          "Microsoft.Extensions.Configuration.Abstractions": "2.0.0",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.0",
+          "Microsoft.Extensions.Logging.Abstractions": "2.0.0"
+        }
+      },
+      "AWSSDK.SecurityToken": {
+        "type": "Transitive",
+        "resolved": "4.0.101.11",
+        "contentHash": "IfIEfVGU3EKSpjLOcFKLYPFCmvsTGs934Hndwy5FwX6q0UVikGGXQoAm+q7imfuXpXjK9cE1oaccMCG773oHlA==",
+        "dependencies": {
+          "AWSSDK.Core": "[4.0.103, 5.0.0)"
+        }
+      },
       "MassTransit.Abstractions": {
         "type": "Transitive",
         "resolved": "8.5.12",
         "contentHash": "NauNyaQsJVfLSY3Jw/zr26POQpEnfjerHCrrK3kUmkCDIpC63PZD1AjihGFgq0KH5eGagMJ7GRHN74w8mI69Kg=="
+      },
+      "Microsoft.Extensions.Configuration.Abstractions": {
+        "type": "Transitive",
+        "resolved": "2.0.0",
+        "contentHash": "rHFrXqMIvQNq51H8RYTO4IWmDOYh8NUzyqGlh0xHWTP6XYnKk7Ryinys2uDs+Vu88b3AMlM3gBBSs78m6OQpYQ==",
+        "dependencies": {
+          "Microsoft.Extensions.Primitives": "2.0.0"
+        }
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Transitive",
@@ -19,6 +59,19 @@
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2"
         }
+      },
+      "Microsoft.Extensions.Primitives": {
+        "type": "Transitive",
+        "resolved": "2.0.0",
+        "contentHash": "ukg53qNlqTrK38WA30b5qhw0GD7y3jdI9PHHASjdKyTcBHTevFM2o23tyk3pWCgAV27Bbkm+CPQ2zUe1ZOuYSA==",
+        "dependencies": {
+          "System.Runtime.CompilerServices.Unsafe": "4.4.0"
+        }
+      },
+      "System.Runtime.CompilerServices.Unsafe": {
+        "type": "Transitive",
+        "resolved": "4.4.0",
+        "contentHash": "9dLLuBxr5GNmOfl2jSMcsHuteEg32BEfUotmmUkmZjpR3RpVHE8YQwt0ow3p6prwA1ME8WqDVZqrr8z6H8G+Kw=="
       },
       "oficina.billing.aplicacao": {
         "type": "Project",
@@ -35,6 +88,9 @@
       "oficina.billing.infraestrutura": {
         "type": "Project",
         "dependencies": {
+          "AWSSDK.DynamoDBv2": "[4.0.110.3, )",
+          "AWSSDK.Extensions.NETCore.Setup": "[4.0.102.11, )",
+          "AWSSDK.SecurityToken": "[4.0.101.11, )",
           "Oficina.Billing.Aplicacao": "[1.0.0, )"
         }
       }

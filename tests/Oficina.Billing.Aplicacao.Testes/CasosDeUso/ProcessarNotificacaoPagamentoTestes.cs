@@ -68,14 +68,16 @@ public class ProcessarNotificacaoPagamentoTestes
     public async Task Aprovado_ComOrcamentoAprovado_RegistraEPublicaConfirmado()
     {
         NoGateway(StatusPagamentoGateway.Aprovado);
-        ComOrcamento(StatusOrcamento.Aprovado);
+        var o = ComOrcamento(StatusOrcamento.Aprovado);
 
         var r = await Criar().ExecutarAsync(Id, default);
 
         r.Should().Be(ResultadoNotificacao.Processado);
         _desfecho!.Pagamento.Status.Should().Be(StatusPagamento.Aprovado);
         _desfecho.PagamentoNovo.Should().BeTrue();
-        _desfecho.OrcamentoAlterado.Should().BeNull();
+        // Guarda de versao: duas confirmacoes simultaneas da mesma OS nao podem gravar as duas.
+        _desfecho.OrcamentoAlterado.Should().BeSameAs(o);
+        o.Status.Should().Be(StatusOrcamento.Aprovado);
         _desfecho.Webhook.EventoTipo.Should().Be("PagamentoConfirmado");
         _desfecho.Webhook.EventoPublicado.Should().BeFalse();
         _pub.Verify(p => p.PublicarAsync(It.Is<PagamentoConfirmado>(m => m.PagamentoId == "1325123456" &&

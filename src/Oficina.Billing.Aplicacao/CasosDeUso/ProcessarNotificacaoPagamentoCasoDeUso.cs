@@ -94,6 +94,10 @@ public class ProcessarNotificacaoPagamentoCasoDeUso(IRepositorioBilling reposito
                 pg.Valor == orcamento.ValorTotal)
             {
                 eventoTipo = EventoConfirmado;
+                // Sem alteracao, mas entra na transacao pela condicao de versao: dois pagamentos aprovados da mesma
+                // OS processados ao mesmo tempo (nenhum ve o outro) nao confirmam os dois; o perdedor recebe
+                // ConcorrenciaException e, na reentrega, ve o outro aprovado e e estornado.
+                orcamentoAlterado = orcamento;
             }
             else
             {
