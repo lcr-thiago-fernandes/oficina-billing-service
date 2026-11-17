@@ -32,7 +32,7 @@ public class MiddlewareDeExcecoes
                 _log.LogWarning(ex, "Requisicao recusada: {Titulo}", problema.Title);
 
             contexto.Response.StatusCode = problema.Status!.Value;
-            await contexto.Response.WriteAsJsonAsync(problema, options: null, contentType: "application/problem+json");
+            await contexto.Response.WriteAsJsonAsync(problema, options: null, contentType: "application/problem+json", cancellationToken: contexto.RequestAborted);
         }
     }
 

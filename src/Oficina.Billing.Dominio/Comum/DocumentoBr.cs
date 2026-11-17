@@ -4,5 +4,7 @@ namespace Oficina.Billing.Dominio.Comum;
 
 public static class DocumentoBr
 {
-    public static string Normalizar(string? valor) => Regex.Replace(valor ?? "", @"\D", "");
+    private static readonly Regex NaoDigitos = new(@"\D", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    public static string Normalizar(string? valor) => NaoDigitos.Replace(valor ?? "", "");
 }
