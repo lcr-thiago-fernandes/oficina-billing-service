@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "oficina.billing.aplicacao": {
+        "type": "Project",
+        "dependencies": {
+          "Oficina.Billing.Dominio": "[1.0.0, )"
+        }
+      },
+      "oficina.billing.dominio": {
+        "type": "Project"
+      },
+      "oficina.billing.infraestrutura": {
+        "type": "Project",
+        "dependencies": {
+          "Oficina.Billing.Aplicacao": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}
