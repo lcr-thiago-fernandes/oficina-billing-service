@@ -69,6 +69,6 @@ ENV CORECLR_ENABLE_PROFILING=0 \
     CORECLR_PROFILER_PATH=/usr/local/newrelic-dotnet-agent/libNewRelicProfiler.so \
     NEW_RELIC_APP_NAME="oficina-billing"
 
-USER app
+USER $APP_UID
 COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "Oficina.Billing.Api.dll"]
