@@ -17,5 +17,5 @@ output "tabelas_dynamodb" {
 }
 
 output "url_notificacao_mercadopago" {
-  value = aws_ssm_parameter.url_notificacao_mercadopago.value
+  value = nonsensitive(aws_ssm_parameter.url_notificacao_mercadopago.value)
 }
